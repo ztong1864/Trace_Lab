@@ -1,0 +1,2282 @@
+version: 1
+entries:
+  '0.045454545454545456':
+    original_value: '0.045454545454545456'
+    translated_description: '0.045454545454545456'
+    brief_properties: []
+    likely_role: Additive
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.09090909090909091':
+    original_value: '0.09090909090909091'
+    translated_description: Numeric additive value (~0.091); appears to be an encoded or normalized quantity rather than a
+      chemical identity.
+    brief_properties:
+    - numeric fractional value
+    - likely encoded feature or proportion
+    - not a recognizable chemical name
+    - may indicate additive level
+    likely_role: encoded additive-related parameter or normalized amount in reaction design
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.13636363636363635':
+    original_value: '0.13636363636363635'
+    translated_description: A numeric additive entry with no explicit chemical identity; likely represents an amount, fraction,
+      or encoded loading rather than a recognizable additive structure.
+    brief_properties:
+    - numeric-only value
+    - no chemical identity encoded
+    - possibly fractional amount or loading
+    likely_role: unspecified additive quantity or encoded additive level in reaction design
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.18181818181818182':
+    original_value: '0.18181818181818182'
+    translated_description: A numeric additive value (~0.182) with no inherent chemical identity; likely represents an amount,
+      fraction, or normalized loading.
+    brief_properties:
+    - numeric-only entry
+    - no chemical structure or name encoded
+    - likely dosage/ratio placeholder
+    likely_role: Unclear additive field value; most likely a quantitative amount, fraction, or encoded level for an additive
+      rather than an additive identity.
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.22727272727272727':
+    original_value: '0.22727272727272727'
+    translated_description: Numeric additive value (0.2273); appears to be an encoded or normalized parameter, not a directly
+      identifiable chemical additive.
+    brief_properties:
+    - numeric fractional value
+    - not a recognizable chemical name
+    - likely encoded feature or normalized amount
+    likely_role: encoded additive descriptor or dataset-derived numeric parameter rather than a directly interpretable reagent
+      identity
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.25':
+    original_value: '0.25'
+    translated_description: Numeric value only; likely a loading/equivalents entry rather than a ligand identity
+    brief_properties:
+    - not a recognizable ligand name
+    - appears to be a quantity or ratio
+    - identity cannot be inferred from value alone
+    likely_role: Likely ligand amount/loading field entry (e.g., equiv, mol%, or stoichiometric ratio), not the ligand identity
+      itself
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  '0.2727272727272727':
+    original_value: '0.2727272727272727'
+    translated_description: A bare numeric value for the Additive column; no specific chemical identity can be inferred.
+    brief_properties:
+    - numeric additive entry
+    - no structural or identity information
+    - likely quantity or encoded category
+    likely_role: Unclear additive-related value; most likely a dosage, ratio, or encoded descriptor rather than an identifiable
+      chemical additive.
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.3181818181818182':
+    original_value: '0.3181818181818182'
+    translated_description: Numeric encoded additive value; exact chemical identity not directly interpretable from the string
+      alone
+    brief_properties:
+    - continuous/numeric representation
+    - not a recognizable chemical name or formula
+    - likely dataset encoding rather than human-readable additive
+    likely_role: Encoded additive selection or descriptor used to represent the additive variable in reaction optimization
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.3333333333333333':
+    original_value: '0.3333333333333333'
+    translated_description: A numeric value approximately equal to one third, likely indicating the amount, equivalents, or
+      proportion of Reactant2.
+    brief_properties:
+    - numeric-only entry
+    - fractional amount (~1/3)
+    - no structural chemical information
+    likely_role: likely stoichiometric amount or equivalent/loading for Reactant2 rather than a chemical identity
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  '0.36363636363636365':
+    original_value: '0.36363636363636365'
+    translated_description: Numeric additive entry (0.3636); appears to be an encoded quantity or normalized value, not a
+      directly identifiable chemical additive.
+    brief_properties:
+    - pure numeric value
+    - not a recognizable chemical name
+    - likely encoded ratio or parameter
+    likely_role: dataset-encoded additive amount or normalized additive feature rather than a specific additive identity
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.4090909090909091':
+    original_value: '0.4090909090909091'
+    translated_description: Numeric encoded additive value; exact chemical identity not inferable from the string alone
+    brief_properties:
+    - continuous/encoded feature rather than a recognizable name
+    - no explicit structural motif visible
+    - likely requires lookup against experiment encoding
+    likely_role: additive selection or additive descriptor value in reaction condition encoding
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.45454545454545453':
+    original_value: '0.45454545454545453'
+    translated_description: Numeric code/value rather than a recognizable additive name
+    brief_properties:
+    - decimal identifier
+    - not chemically descriptive
+    - no structural motifs visible
+    likely_role: encoded additive category or normalized feature
+    confidence: low
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.5':
+    original_value: '0.5'
+    translated_description: Numeric ligand entry; likely indicates a ligand amount/loading (e.g., equivalent, mol%, or ratio),
+      not a specific named ligand.
+    brief_properties:
+    - numeric entry only
+    - no chemical identity specified
+    - likely amount or loading
+    - context depends on column meaning
+    likely_role: reported ligand quantity, ratio, or loading rather than a specific ligand identity
+    confidence: low
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  '0.5454545454545454':
+    original_value: '0.5454545454545454'
+    translated_description: Numeric encoded additive value; exact chemical identity not directly interpretable from the string
+      alone
+    brief_properties:
+    - continuous/numeric token rather than a name
+    - no recognizable molecular motif
+    - likely dataset encoding or normalized level
+    - chemical behavior cannot be inferred directly
+    likely_role: Encoded additive selection or additive amount/level in the reaction design space
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  '0.6666666666666666':
+    original_value: '0.6666666666666666'
+    translated_description: 'Numeric value only: approximately two-thirds (0.667), likely indicating a ratio, fraction, or
+      equivalents for Reactant2 rather than a specific chemical substance.'
+    brief_properties:
+    - pure numeric entry
+    - fraction-like quantity (~0.667)
+    - not a recognizable chemical name
+    - likely metadata or stoichiometric amount
+    likely_role: numeric stoichiometric coefficient, ratio, or equivalents for Reactant2 rather than a chemical identity
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  '0.75':
+    original_value: '0.75'
+    translated_description: Numeric ligand-associated value of 0.75; likely a parameter such as equivalents, mol%, or ratio,
+      not a specific ligand identity.
+    brief_properties:
+    - numeric scalar only
+    - not a recognizable ligand name
+    - could denote amount, ratio, or loading
+    likely_role: ligand parameter value (likely stoichiometric amount/loading rather than ligand identity)
+    confidence: low
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  1,2-benzoxazole:
+    original_value: 1,2-benzoxazole
+    translated_description: A benzoxazole heteroaromatic ring system (benzene fused to an oxazole-like five-membered ring).
+    brief_properties:
+    - fused aromatic heterocycle
+    - contains ring nitrogen and oxygen
+    - rigid, planar motif
+    - may act as weakly coordinating heteroaromatic scaffold
+    likely_role: likely a heteroaromatic additive or ligand-like scaffold in reaction optimization
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  1-bromo-4-(trifluoromethyl)benzene:
+    original_value: 1-bromo-4-(trifluoromethyl)benzene
+    translated_description: para-brominated trifluoromethyl-substituted benzene (aryl bromide bearing a CF3 group)
+    brief_properties:
+    - aryl bromide leaving group
+    - electron-withdrawing CF3 substituent
+    - hydrophobic aromatic ring
+    likely_role: electrophilic aryl halide coupling partner
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  1-bromo-4-ethylbenzene:
+    original_value: 1-bromo-4-ethylbenzene
+    translated_description: Para-ethyl bromobenzene (an aryl bromide bearing an ethyl-substituted benzene ring)
+    brief_properties:
+    - aryl bromide electrophile
+    - para-ethyl substituent
+    - hydrophobic aromatic motif
+    - likely cross-coupling handle
+    likely_role: aryl halide substrate / coupling partner
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  1-bromo-4-methoxybenzene:
+    original_value: 1-bromo-4-methoxybenzene
+    translated_description: A para-brominated anisole (methoxy-substituted bromobenzene)
+    brief_properties:
+    - aryl bromide
+    - electron-rich aromatic ring
+    - methoxy substituent
+    - likely cross-coupling handle
+    likely_role: electrophilic aryl coupling partner
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  1-chloro-4-(trifluoromethyl)benzene:
+    original_value: 1-chloro-4-(trifluoromethyl)benzene
+    translated_description: Para-chloro trifluoromethyl benzene (a chlorinated fluorinated arene)
+    brief_properties:
+    - aryl chloride
+    - strong electron-withdrawing CF3 group
+    - electron-poor aromatic ring
+    - likely coupling electrophile
+    likely_role: Aryl halide substrate / electrophilic partner in cross-coupling or substitution
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  1-chloro-4-ethylbenzene:
+    original_value: 1-chloro-4-ethylbenzene
+    translated_description: Para-ethyl chlorobenzene; an aryl chloride bearing an ethyl substituent on the benzene ring.
+    brief_properties:
+    - aryl chloride
+    - para-substituted benzene
+    - electrophilic coupling handle
+    - hydrophobic aromatic motif
+    likely_role: aryl-halide substrate/electrophile in cross-coupling or related aromatic substitution design
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  1-chloro-4-methoxybenzene:
+    original_value: 1-chloro-4-methoxybenzene
+    translated_description: A chlorinated anisole (para-methoxy chlorobenzene)
+    brief_properties:
+    - aryl chloride
+    - electron-donating methoxy group
+    - substituted benzene ring
+    - likely hydrophobic, moderately inert aromatic
+    likely_role: aryl substrate or electrophilic coupling partner
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  1-ethyl-4-iodobenzene:
+    original_value: 1-ethyl-4-iodobenzene
+    translated_description: para-ethyl iodobenzene; an aryl iodide bearing an ethyl substituent on the benzene ring
+    brief_properties:
+    - aryl iodide leaving group
+    - para-alkyl substituted phenyl ring
+    - typically electrophilic coupling partner
+    - hydrophobic, nonpolar aromatic scaffold
+    likely_role: aryl halide coupling substrate in cross-coupling or related substitution chemistry
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  1-iodo-4-(trifluoromethyl)benzene:
+    original_value: 1-iodo-4-(trifluoromethyl)benzene
+    translated_description: Para-trifluoromethyl aryl iodide (an iodo-substituted benzene with a CF3 group).
+    brief_properties:
+    - aryl iodide leaving group
+    - electron-withdrawing CF3 substituent
+    - typically electrophilic coupling partner
+    - halogenated aromatic substrate
+    likely_role: aryl halide electrophile for cross-coupling or substitution
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  1-iodo-4-methoxybenzene:
+    original_value: 1-iodo-4-methoxybenzene
+    translated_description: An aryl iodide bearing a methoxy substituent on the benzene ring.
+    brief_properties:
+    - aryl iodide
+    - electron-donating methoxy group
+    - common cross-coupling handle
+    - moderately activated aromatic ring
+    likely_role: electrophilic coupling partner / aryl halide substrate
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  1-methyl-2,3,4,6,7,8-hexahydropyrimido[1,2-a]pyrimidine:
+    original_value: 1-methyl-2,3,4,6,7,8-hexahydropyrimido[1,2-a]pyrimidine
+    translated_description: A methyl-substituted, partially saturated fused diazabicyclic amine (hexahydropyrimido[1,2-a]pyrimidine
+      scaffold).
+    brief_properties:
+    - fused N-rich bicyclic amine
+    - basic tertiary/heteroamine character
+    - partially saturated, conformationally constrained
+    - likely small-molecule base or ligand motif
+    likely_role: heterocyclic amine additive / base / ligand-like scaffold
+    confidence: medium
+    columns_seen:
+    - Base
+    source: llm_translation
+  '1.0':
+    original_value: '1.0'
+    translated_description: Numeric base value of 1.0; most likely a default, normalized, or relative setting rather than
+      a specific chemical substance.
+    brief_properties:
+    - numeric value only
+    - dimensionless-looking entry
+    - no chemical identity specified
+    likely_role: generic reaction parameter or normalized/base setting
+    confidence: high
+    columns_seen:
+    - Base
+    source: llm_translation
+  1a, 6-Cl-Q:
+    original_value: 1a, 6-Cl-Q
+    translated_description: substrate/electrophile entry labeled 1a; likely a 6-chloro Q-derived scaffold
+    brief_properties:
+    - contains a chloro substituent at the 6-position
+    - '"Q" likely denotes a core scaffold or heteroaromatic motif'
+    - identifier-style label suggests shorthand rather than full structure
+    likely_role: electrophile
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  1b, 6-Br-Q:
+    original_value: 1b, 6-Br-Q
+    translated_description: Entry 1b; likely a 6-bromo Q-derived aromatic/heteroaromatic electrophile
+    brief_properties:
+    - contains a bromide leaving group
+    - likely aromatic or heteroaromatic scaffold
+    - position-specific substitution at the 6-position
+    - plausible cross-coupling electrophile
+    likely_role: electrophile substrate; likely a brominated heteroarene or aryl halide coupling partner
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  1c, 6-OTf-Q:
+    original_value: 1c, 6-OTf-Q
+    translated_description: Likely a Q-series electrophile bearing a triflate (OTf) substituent at the 6-position; exact core
+      scaffold unspecified.
+    brief_properties:
+    - contains triflate leaving group
+    - 6-substituted variant
+    - likely activated for substitution or cross-coupling
+    - series/code-like substrate label (Q)
+    likely_role: electrophile substrate variant in a reaction screening set
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  1d, 6-I-Q:
+    original_value: 1d, 6-I-Q
+    translated_description: coded substrate entry; likely an iodo-substituted Q scaffold ("6-I" suggests iodine at the 6-position)
+    brief_properties:
+    - contains iodine/iodo handle
+    - position-specific substitution indicated
+    - appears to be a shorthand or library code
+    - likely reactive as a halide electrophile
+    likely_role: electrophile; likely an aryl/vinyl halide coupling partner
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  1e, 6-BOH2-Q:
+    original_value: 1e, 6-BOH2-Q
+    translated_description: Library code “1e” for an electrophile annotated as “6-BOH2-Q”; likely a substituted Q-type scaffold
+      with a 6-position boronic-acid-like group, but exact identity is uncertain.
+    brief_properties:
+    - appears to be a coded library entry
+    - Q-type/aromatic heterocycle shorthand
+    - substituent noted at the 6-position
+    - '"BOH2" suggests a boronic-acid-like motif'
+    likely_role: electrophile substrate identifier in a reaction screen
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  1f, 6-BPin-Q:
+    original_value: 1f, 6-BPin-Q
+    translated_description: quinoline-type electrophile bearing a BPin (pinacol boronate) substituent, likely at the 6-position
+    brief_properties:
+    - heteroaryl/quinoline-like motif
+    - contains BPin boronate group
+    - position-specific substitution indicated (6-)
+    - label prefix ('1f') suggests an internal sample/code
+    likely_role: heteroaryl electrophile substrate or coupling partner identifier in reaction screening
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  1g, 6-BF3K-Q:
+    original_value: 1g, 6-BF3K-Q
+    translated_description: likely a potassium organotrifluoroborate derivative ("BF3K"), entry/code "1g" with an additional
+      qualifier "Q"; exact structure unspecified
+    brief_properties:
+    - contains BF3K organoboron motif
+    - often used as a bench-stable coupling partner
+    - coded/library-style identifier rather than full structure
+    - exact substitution pattern not inferable from string alone
+    likely_role: organoboron nucleophile / cross-coupling partner
+    confidence: medium
+    columns_seen:
+    - electrophile
+    source: llm_translation
+  2,1-benzoxazole:
+    original_value: 2,1-benzoxazole
+    translated_description: A benzoxazole-type heteroaromatic additive; likely a fused aromatic ring containing nitrogen and
+      oxygen.
+    brief_properties:
+    - fused heteroaromatic ring
+    - contains N and O heteroatoms
+    - planar, aromatic, relatively rigid
+    likely_role: heteroaromatic additive or ligand-like modifier
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  2-bromopyridine:
+    original_value: 2-bromopyridine
+    translated_description: a brominated pyridine building block with bromine at the 2-position
+    brief_properties:
+    - heteroaromatic pyridine ring
+    - aryl bromide / halide handle
+    - electron-poor ring
+    - common cross-coupling substrate
+    likely_role: reactive aryl halide coupling partner or substrate precursor
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  2-chloropyridine:
+    original_value: 2-chloropyridine
+    translated_description: A pyridine ring bearing a chlorine substituent at the 2-position.
+    brief_properties:
+    - heteroaromatic pyridine
+    - aryl chloride / leaving-group-like handle
+    - electron-deficient ring
+    likely_role: substrate or coupling partner in reaction design
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  2-iodopyridine:
+    original_value: 2-iodopyridine
+    translated_description: Pyridine ring bearing an iodine substituent at the 2-position
+    brief_properties:
+    - heteroaromatic pyridine
+    - aryl iodide leaving group
+    - electron-poor ring
+    likely_role: halogenated heteroaryl coupling partner or substrate
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  2-tert-butyl-1,1,3,3-tetramethylguanidine:
+    original_value: 2-tert-butyl-1,1,3,3-tetramethylguanidine
+    translated_description: A bulky, highly substituted guanidine base
+    brief_properties:
+    - strong non-nucleophilic base
+    - sterically hindered
+    - nitrogen-rich amidine/guanidine motif
+    likely_role: base / proton scavenger in reaction setup
+    confidence: high
+    columns_seen:
+    - Base
+    source: llm_translation
+  2a, Boronic Acid:
+    original_value: 2a, Boronic Acid
+    translated_description: Boronic acid substrate labeled “2a”; an organoboron reagent bearing a boronic acid functional
+      group
+    brief_properties:
+    - contains boronic acid motif
+    - common coupling partner in cross-coupling
+    - Lewis acidic boron center
+    - often handled as a substrate/reagent identifier
+    likely_role: nucleophilic coupling partner / organoboron substrate
+    confidence: high
+    columns_seen:
+    - nucleophile
+    source: llm_translation
+  2b, Boronic Ester:
+    original_value: 2b, Boronic Ester
+    translated_description: 'Entry 2b: a boronic ester reagent'
+    brief_properties:
+    - organoboron functional group
+    - commonly used as a coupling partner
+    - typically bench-stable relative to boronic acids
+    - suggests carbon-based nucleophile precursor
+    likely_role: Nucleophilic coupling partner / organoboron substrate in reaction optimization
+    confidence: high
+    columns_seen:
+    - nucleophile
+    source: llm_translation
+  2c, Trifluoroborate:
+    original_value: 2c, Trifluoroborate
+    translated_description: Trifluoroborate-tagged nucleophile entry; likely an organotrifluoroborate reagent rather than
+      a fully specified structure.
+    brief_properties:
+    - organoboron/trifluoroborate motif
+    - typically bench-stable boron reagent
+    - commonly used in cross-coupling/transmetalation chemistry
+    - exact carbon framework unspecified
+    likely_role: nucleophilic coupling partner / boron-based substrate identifier
+    confidence: medium
+    columns_seen:
+    - nucleophile
+    source: llm_translation
+  2d, Bromide:
+    original_value: 2d, Bromide
+    translated_description: Bromide variant of entry 2d; likely a bromide-containing substrate or reagent label rather than
+      a fully specified structure
+    brief_properties:
+    - contains bromide / bromo designation
+    - identity depends on internal code "2d"
+    - could function as leaving-group-bearing precursor or halide source
+    - structural details not inferable from string alone
+    likely_role: nucleophile entry label for a bromide-designated reaction component
+    confidence: medium
+    columns_seen:
+    - nucleophile
+    source: llm_translation
+  3,5-dimethyl-1,2-oxazole:
+    original_value: 3,5-dimethyl-1,2-oxazole
+    translated_description: A methyl-substituted oxazole heteroaromatic ring
+    brief_properties:
+    - five-membered O/N heteroaromatic
+    - two methyl substituents
+    - flat, aromatic, mildly electron-deficient ring
+    likely_role: small heteroaryl additive or ligand-like heterocycle
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  3-bromopyridine:
+    original_value: 3-bromopyridine
+    translated_description: A pyridine ring bearing a bromine substituent at the 3-position
+    brief_properties:
+    - heteroaryl bromide
+    - electron-poor aromatic ring
+    - potential cross-coupling electrophile
+    likely_role: aryl halide coupling partner
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  3-chloropyridine:
+    original_value: 3-chloropyridine
+    translated_description: A pyridine ring bearing a chlorine substituent at the 3-position (meta to the ring nitrogen).
+    brief_properties:
+    - heteroaromatic pyridine
+    - aryl chloride motif
+    - electron-poor ring
+    - potential cross-coupling electrophile
+    likely_role: aryl halide coupling partner / reactive aryl electrophile
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  3-iodopyridine:
+    original_value: 3-iodopyridine
+    translated_description: A pyridine ring bearing an iodine substituent at the 3-position
+    brief_properties:
+    - heteroaryl halide
+    - aryl iodide handle
+    - electron-poor pyridine ring
+    likely_role: electrophilic coupling partner in cross-coupling reactions
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: llm_translation
+  3-methyl-1,2-oxazole:
+    original_value: 3-methyl-1,2-oxazole
+    translated_description: A methyl-substituted oxazole heteroaromatic ring (isoxazole-like five-membered N/O heterocycle).
+    brief_properties:
+    - heteroaromatic ring
+    - one methyl substituent
+    - polar heterocycle
+    - likely small organic additive
+    likely_role: heterocycle additive or scaffold fragment
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  3-methyl-5-phenyl-1,2-oxazole:
+    original_value: 3-methyl-5-phenyl-1,2-oxazole
+    translated_description: A substituted isoxazole (1,2-oxazole) ring bearing a methyl group and a phenyl group.
+    brief_properties:
+    - heteroaromatic five-membered ring
+    - aryl-substituted, moderately hydrophobic
+    - nitrogen-oxygen heterocycle
+    - likely spectator additive / ligand-like small molecule
+    likely_role: small heteroaromatic additive or substrate-like aromatic modifier in reaction screening
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  3-phenyl-1,2-oxazole:
+    original_value: 3-phenyl-1,2-oxazole
+    translated_description: A phenyl-substituted oxazole heteroaromatic additive.
+    brief_properties:
+    - aromatic heterocycle
+    - contains oxazole N/O atoms
+    - phenyl substituent increases rigidity and lipophilicity
+    likely_role: small-molecule additive or ligand-like heteroaromatic component
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  4-phenyl-1,2-oxazole:
+    original_value: 4-phenyl-1,2-oxazole
+    translated_description: A phenyl-substituted oxazole heteroaromatic ring
+    brief_properties:
+    - heteroaromatic ring
+    - aryl-substituted motif
+    - planar, relatively rigid scaffold
+    likely_role: small-molecule additive or ligand-like aromatic component
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  5-(2,6-difluorophenyl)-1,2-oxazole:
+    original_value: 5-(2,6-difluorophenyl)-1,2-oxazole
+    translated_description: A fluorinated aryl-substituted isoxazole/oxazole-like heteroaromatic ring bearing a 2,6-difluorophenyl
+      group
+    brief_properties:
+    - heteroaromatic ring
+    - electron-poor due to fluorines
+    - aryl-substituted, rigid motif
+    - small hydrophobic fragment
+    likely_role: Additive or ligand-like aromatic co-component in reaction screening
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  5-methyl-1,2-oxazole:
+    original_value: 5-methyl-1,2-oxazole
+    translated_description: A methyl-substituted oxazole heteroaromatic additive
+    brief_properties:
+    - heteroaromatic ring
+    - N/O-containing five-membered ring
+    - small, relatively electron-poor motif
+    - potential weak coordinating/basic site
+    likely_role: small heteroaryl additive or ligand-like modifier
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  5-methyl-3-pyrrol-1-yl-1,2-oxazole:
+    original_value: 5-methyl-3-pyrrol-1-yl-1,2-oxazole
+    translated_description: A methyl-substituted oxazole bearing a pyrrole-derived N-substituent
+    brief_properties:
+    - heteroaromatic scaffold
+    - one oxazole ring and one pyrrolyl fragment
+    - likely small, planar, electron-poor/heteroatom-rich additive
+    likely_role: heteroaromatic additive or ligand-like component in reaction optimization
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  5-phenyl-1,2-oxazole:
+    original_value: 5-phenyl-1,2-oxazole
+    translated_description: A phenyl-substituted oxazole heteroaromatic additive.
+    brief_properties:
+    - heteroaromatic ring
+    - phenyl substituent
+    - nitrogen/oxygen-containing motif
+    - rigid, likely aromatic
+    likely_role: small aromatic additive / ligand-like or tuning component in reaction optimization
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  AmPhos:
+    original_value: AmPhos
+    translated_description: Named phosphine ligand; exact structure not inferable from the string alone
+    brief_properties:
+    - phosphine-type ligand
+    - likely electron-donating donor
+    - used to tune metal-catalyst reactivity/selectivity
+    likely_role: ligand for a transition-metal catalyst
+    confidence: medium
+    columns_seen:
+    - ligand
+    source: llm_translation
+  Brc1ccccn1:
+    original_value: Brc1ccccn1
+    translated_description: brominated pyridine ring (likely bromopyridine)
+    brief_properties:
+    - six-membered aromatic N-heterocycle
+    - aryl bromide / halogenated heteroarene
+    - electron-poor aromatic ring
+    - common cross-coupling electrophile
+    likely_role: heteroaryl halide reactant / coupling partner
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    - Reactant2
+    source: llm_translation
+  Brc1cccnc1:
+    original_value: Brc1cccnc1
+    translated_description: bromopyridine-like heteroaryl bromide electrophile with a different pyridine substitution pattern.
+    brief_properties:
+    - heteroaryl bromide
+    - pyridine ring
+    - Lewis-basic nitrogen
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  C(N(Cc1ccccc1)c2ccon2)c3ccccc3:
+    original_value: C(N(Cc1ccccc1)c2ccon2)c3ccccc3
+    translated_description: bulky aminomethyl/benzyl-substituted N/O heteroarene additive/coupling partner.
+    brief_properties:
+    - N/O heteroarene
+    - benzyl/phenyl substituents
+    - bulky hydrophobic groups
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: low
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  C(N(Cc1ccccc1)c2oncc2)c3ccccc3:
+    original_value: C(N(Cc1ccccc1)c2oncc2)c3ccccc3
+    translated_description: bulky aminomethyl/benzyl-substituted isoxazole-like additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - benzyl/phenyl substituents
+    - bulky hydrophobic groups
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: low
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  CC(C)C(C=C(C(C)C)C=C1C(C)C)=C1C2=CC=CC=C2P(C(C)(C)C)C(C)(C)C:
+    original_value: CC(C)C(C=C(C(C)C)C=C1C(C)C)=C1C2=CC=CC=C2P(C(C)(C)C)C(C)(C)C
+    translated_description: bulky electron-rich biaryl phosphine ligand bearing di-tert-butylphosphino and triisopropylaryl
+      motifs.
+    brief_properties:
+    - bulky biaryl phosphine
+    - di-tert-butylphosphino group
+    - electron-rich ligand
+    - Pd ligand condition
+    likely_role: phosphine ligand condition for palladium-catalyzed C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Ligand_SMILES
+    source: manual_conservative_arylation_annotation
+  CC(C)C1=CC(C(C)C)=CC(C(C)C)=C1C2=C(P(C(C)(C)C)C(C)(C)C)C(OC)=CC=C2OC:
+    original_value: CC(C)C1=CC(C(C)C)=CC(C(C)C)=C1C2=C(P(C(C)(C)C)C(C)(C)C)C(OC)=CC=C2OC
+    translated_description: bulky electron-rich methoxy-substituted biaryl phosphine ligand with di-tert-butylphosphino group.
+    brief_properties:
+    - bulky biaryl phosphine
+    - di-tert-butylphosphino group
+    - methoxy-substituted aryl ring
+    - Pd ligand condition
+    likely_role: phosphine ligand condition for palladium-catalyzed C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Ligand_SMILES
+    source: manual_conservative_arylation_annotation
+  CC(C)C1=CC(C(C)C)=CC(C(C)C)=C1C2=C(P(C3CCCCC3)C4CCCCC4)C=CC=C2:
+    original_value: CC(C)C1=CC(C(C)C)=CC(C(C)C)=C1C2=C(P(C3CCCCC3)C4CCCCC4)C=CC=C2
+    translated_description: bulky electron-rich biaryl phosphine ligand bearing dicyclohexylphosphino and triisopropylaryl
+      motifs.
+    brief_properties:
+    - bulky biaryl phosphine
+    - dicyclohexylphosphino group
+    - electron-rich ligand
+    - Pd ligand condition
+    likely_role: phosphine ligand condition for palladium-catalyzed C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Ligand_SMILES
+    source: manual_conservative_arylation_annotation
+  CC(C)c1cc(C(C)C)c(-c2ccccc2P(C(C)(C)C)C(C)(C)C)c(C(C)C)c1:
+    original_value: CC(C)c1cc(C(C)C)c(-c2ccccc2P(C(C)(C)C)C(C)(C)C)c(C(C)C)c1
+    translated_description: Bulky biaryl tertiary phosphine ligand with di-tert-butylphosphino and triisopropyl-substituted
+      aryl features.
+    brief_properties:
+    - bulky dialkyl biaryl phosphine motif
+    - electron-rich tertiary phosphine
+    - sterically hindered aryl substituents
+    - likely organometallic ligand
+    likely_role: supporting ligand for transition-metal catalysis, especially cross-coupling reaction optimization
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  CC(C)c1cc(C(C)C)c(-c2ccccc2P(C2CCCCC2)C2CCCCC2)c(C(C)C)c1:
+    original_value: CC(C)c1cc(C(C)C)c(-c2ccccc2P(C2CCCCC2)C2CCCCC2)c(C(C)C)c1
+    translated_description: Bulky biaryl monophosphine ligand featuring a highly substituted aryl ring, a pendant phenyl linker,
+      and dicyclohexylphosphine substituents.
+    brief_properties:
+    - bulky triaryl/biaryl phosphine motif
+    - multiple isopropyl substituents on aryl ring
+    - two cyclohexyl groups on phosphorus
+    - strongly lipophilic, sterically demanding ligand
+    likely_role: phosphine ligand for transition-metal catalysis
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  CC(C1=C(C2=C(OC)C=CC(OC)=C2P(C34CC5CC(C4)CC(C5)C3)C67CC8CC(C7)CC(C8)C6)C(C(C)C)=CC(C(C)C)=C1)C:
+    original_value: CC(C1=C(C2=C(OC)C=CC(OC)=C2P(C34CC5CC(C4)CC(C5)C3)C67CC8CC(C7)CC(C8)C6)C(C(C)C)=CC(C(C)C)=C1)C
+    translated_description: very bulky electron-rich methoxy-substituted biaryl phosphine ligand bearing large adamantyl-like
+      alkyl groups.
+    brief_properties:
+    - very bulky biaryl phosphine
+    - large aliphatic phosphine substituents
+    - methoxy-substituted aryl ring
+    - Pd ligand condition
+    likely_role: phosphine ligand condition for palladium-catalyzed C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Ligand_SMILES
+    source: manual_conservative_arylation_annotation
+  CCN=P(N=P(N(C)C)(N(C)C)N(C)C)(N(C)C)N(C)C:
+    original_value: CCN=P(N=P(N(C)C)(N(C)C)N(C)C)(N(C)C)N(C)C
+    translated_description: Heavily amino-substituted phosphazene-type base with multiple dimethylamino groups; recognizable
+      as a very strong non-nucleophilic organic base.
+    brief_properties:
+    - multiamino phosphazene / P=N framework
+    - strongly basic, non-nucleophilic character likely
+    - highly substituted dimethylamino groups
+    - likely moisture- and air-sensitive organic base
+    likely_role: strong non-nucleophilic base used for deprotonation or acid scavenging
+    confidence: high
+    columns_seen:
+    - Base
+    source: llm_translation
+  CCOC(=O)c1cc(C)no1:
+    original_value: CCOC(=O)c1cc(C)no1
+    translated_description: Ethyl ester attached to a methyl-substituted N/O-containing five-membered heteroaromatic ring.
+    brief_properties:
+    - ethyl ester motif
+    - five-membered N/O heteroaromatic ring
+    - methyl-substituted heteroarene
+    - moderately polar organic additive candidate
+    likely_role: heteroaromatic ester additive or substrate-like component used to tune reactivity/solubility
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  CCOC(=O)c1cc(C)on1:
+    original_value: CCOC(=O)c1cc(C)on1
+    translated_description: Small methyl-substituted heteroaromatic ester (isoxazole-like), containing an ethyl carboxylate;
+      likely a neutral organic additive/component rather than a catalyst.
+    brief_properties:
+    - heteroaromatic isoxazole-like ring
+    - ethyl ester functionality
+    - methyl-substituted ring
+    - neutral moderately lipophilic small molecule
+    likely_role: additive or heteroaromatic ester substrate/component
+    confidence: medium
+    columns_seen:
+    - Additive
+    - Additive_SMILES
+    source: llm_translation
+  CCOC(=O)c1cc(OC)no1:
+    original_value: CCOC(=O)c1cc(OC)no1
+    translated_description: Methoxy-substituted heteroaromatic carboxylic acid ethyl ester (isoxazole-like ester); a neutral
+      small organic additive/substrate-like molecule.
+    brief_properties:
+    - heteroaromatic isoxazole-like ring
+    - ethyl ester functionality
+    - methoxy substituent on ring
+    - neutral, moderately lipophilic small molecule
+    likely_role: additive or small-molecule heteroaromatic component; more likely a substrate-like organic additive than an
+      inorganic reagent
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  CCOC(=O)c1ccon1:
+    original_value: CCOC(=O)c1ccon1
+    translated_description: Ethyl ester-substituted oxazole-like heteroaromatic compound
+    brief_properties:
+    - ethyl ester functionality
+    - five-membered O/N heteroaromatic ring
+    - polar heteroatom-rich additive
+    - may act as coordinating or weakly basic component
+    likely_role: additive; likely used to modulate reaction environment through heteroatom coordination or polarity rather
+      than as a main reagent
+    confidence: medium
+    columns_seen:
+    - Additive
+    - Additive_SMILES
+    source: llm_translation
+  CCOC(=O)c1cnoc1:
+    original_value: CCOC(=O)c1cnoc1
+    translated_description: Ethyl ester attached to a five-membered N/O-containing heteroaromatic ring (an isoxazole/oxazole-like
+      carboxylate ester).
+    brief_properties:
+    - ethyl ester motif
+    - five-membered N/O heteroaromatic ring
+    - neutral moderately polar molecule
+    - possible electrophilic/carboxylate-derived additive
+    likely_role: small heteroaromatic ester additive or substrate-like component in reaction screening
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  CCOC(=O)c1cnoc1C:
+    original_value: CCOC(=O)c1cnoc1C
+    translated_description: A small methyl-substituted heteroaromatic carboxylate bearing an ethyl ester group (isoxazole/oxazole-like
+      ring system).
+    brief_properties:
+    - heteroaromatic five-membered ring
+    - ethyl ester functionality
+    - methyl-substituted ring
+    - moderately polar organic additive candidate
+    likely_role: small-molecule additive or substrate-like heteroaromatic ester component
+    confidence: medium
+    columns_seen:
+    - Additive
+    - Additive_SMILES
+    source: llm_translation
+  CCOC(=O)c1conc1:
+    original_value: CCOC(=O)c1conc1
+    translated_description: ethyl ester substituted N/O heteroarene additive/coupling partner.
+    brief_properties:
+    - five-membered N/O heteroarene
+    - ethyl ester substituent
+    - polar carbonyl group
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  CCOC(=O)c1onc(C)c1:
+    original_value: CCOC(=O)c1onc(C)c1
+    translated_description: methyl-substituted ethyl ester isoxazole-like additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - ethyl ester substituent
+    - methyl substituent
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  CCOC(=O)c1onc(OC)c1:
+    original_value: CCOC(=O)c1onc(OC)c1
+    translated_description: methoxy-substituted ethyl ester isoxazole-like additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - ethyl ester substituent
+    - methoxy substituent
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  CCc1ccc(Br)cc1:
+    original_value: CCc1ccc(Br)cc1
+    translated_description: ethyl-substituted aryl bromide electrophile; alkyl-substituted aromatic bromide.
+    brief_properties:
+    - aryl bromide
+    - ethyl substituent
+    - hydrophobic arene
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  CCc1ccc(Cl)cc1:
+    original_value: CCc1ccc(Cl)cc1
+    translated_description: ethyl-substituted aryl chloride electrophile; alkyl-substituted aromatic chloride.
+    brief_properties:
+    - aryl chloride
+    - ethyl substituent
+    - hydrophobic arene
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  CCc1ccc(I)cc1:
+    original_value: CCc1ccc(I)cc1
+    translated_description: ethyl-substituted aryl iodide electrophile; alkyl-substituted aromatic iodide.
+    brief_properties:
+    - aryl iodide
+    - ethyl substituent
+    - hydrophobic arene
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  CN(C)/C(N(C)C)=N\C(C)(C)C:
+    original_value: CN(C)/C(N(C)C)=N\C(C)(C)C
+    translated_description: strong amidine/guanidine-like organic base with tert-butyl imine substituent.
+    brief_properties:
+    - strong organic base
+    - amidine/guanidine-like motif
+    - sterically hindered tert-butyl group
+    - condition variable
+    likely_role: base condition in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Base_SMILES
+    source: manual_conservative_arylation_annotation
+  CN(C)C(=NC(C)(C)C)N(C)C:
+    original_value: CN(C)C(=NC(C)(C)C)N(C)C
+    translated_description: Bulky tetramethylguanidine-like organic base with a tert-butyl imino substituent
+    brief_properties:
+    - strong, neutral organic base motif
+    - guanidine/amidine-like C=N–N framework
+    - bulky tert-butyl imino substituent
+    - tertiary dimethylamino groups
+    likely_role: non-nucleophilic or weakly nucleophilic organic base used to promote deprotonation/activation in reaction
+      design
+    confidence: medium
+    columns_seen:
+    - Base
+    source: llm_translation
+  CN(C)P(N(C)C)(N(C)C)=NP(N(C)C)(N(C)C)=NCC:
+    original_value: CN(C)P(N(C)C)(N(C)C)=NP(N(C)C)(N(C)C)=NCC
+    translated_description: strong, highly basic phosphazene-like organic base.
+    brief_properties:
+    - strong organic base
+    - phosphazene-like motif
+    - multiple dimethylamino groups
+    - non-nucleophilic base candidate
+    likely_role: base condition in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Base_SMILES
+    source: manual_conservative_arylation_annotation
+  CN1CCCN2CCCN=C12:
+    original_value: CN1CCCN2CCCN=C12
+    translated_description: Fused bicyclic, nitrogen-rich tertiary amine amidine-like heterocycle; a strongly basic polycyclic
+      N-heterocycle.
+    brief_properties:
+    - polycyclic tertiary aminal/diaminal-like N-heterocycle
+    - strongly basic, polyamine-like nitrogen content
+    - rigid bicyclic cage-like framework
+    - likely polar and nucleophilic tertiary amine base
+    likely_role: organic base / tertiary amine additive or catalyst scaffold
+    confidence: medium
+    columns_seen:
+    - Base
+    - Base_SMILES
+    source: llm_translation
+  COC(=O)c1cc(-c2ccco2)on1:
+    original_value: COC(=O)c1cc(-c2ccco2)on1
+    translated_description: Heteroaromatic N/O-containing compound bearing a methyl ester and a furan-type aryl substituent;
+      a neutral, functionalized small molecule.
+    brief_properties:
+    - heteroaromatic N/O-containing ring
+    - ester (methyl carboxylate) functionality
+    - furan-like aromatic substituent
+    - neutral, likely relatively electron-poor scaffold
+    likely_role: small-molecule additive or heteroaromatic substrate-like modulator
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  COC(=O)c1cc(-c2cccs2)on1:
+    original_value: COC(=O)c1cc(-c2cccs2)on1
+    translated_description: Methyl ester–substituted heteroaromatic compound bearing a thiophene ring
+    brief_properties:
+    - methyl ester functionality
+    - heteroaromatic oxazole/isoxazole-like ring
+    - thiophene substituent
+    - electron-rich sulfur-containing aryl motif
+    likely_role: additive or ligand-like heteroaromatic modifier used to influence reaction outcome rather than a primary
+      reagent
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  COC(=O)c1cc(on1)c2occc2:
+    original_value: COC(=O)c1cc(on1)c2occc2
+    translated_description: methyl ester isoxazole-like heteroarene bearing an additional oxygen-containing heteroaryl substituent.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - methyl ester substituent
+    - extra heteroaryl group
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  COC(=O)c1cc(on1)c2sccc2:
+    original_value: COC(=O)c1cc(on1)c2sccc2
+    translated_description: methyl ester isoxazole-like heteroarene bearing a sulfur-containing heteroaryl substituent.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - methyl ester substituent
+    - thiophene-like substituent
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  COC(=O)c1ccno1:
+    original_value: COC(=O)c1ccno1
+    translated_description: Small heteroaromatic methyl ester containing a nitrogen/oxygen five-membered ring (isoxazole-like).
+    brief_properties:
+    - methyl ester functionality
+    - 5-membered N/O heteroaromatic ring
+    - electron-poor aromatic heterocycle
+    - small polar organic additive
+    likely_role: heteroaromatic ester additive or building-block-like additive
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  COC(=O)c1oncc1:
+    original_value: COC(=O)c1oncc1
+    translated_description: methyl ester substituted isoxazole-like heteroarene additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - methyl ester substituent
+    - polar carbonyl group
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  COc1ccc(Br)cc1:
+    original_value: COc1ccc(Br)cc1
+    translated_description: methoxy-substituted aryl bromide electrophile; anisole-like aryl bromide.
+    brief_properties:
+    - aryl bromide
+    - methoxy substituent
+    - electron-donating substituent
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  COc1ccc(Cl)cc1:
+    original_value: COc1ccc(Cl)cc1
+    translated_description: methoxy-substituted aryl chloride electrophile; anisole-like aryl chloride.
+    brief_properties:
+    - aryl chloride
+    - methoxy substituent
+    - electron-donating substituent
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  COc1ccc(I)cc1:
+    original_value: COc1ccc(I)cc1
+    translated_description: methoxy-substituted aryl iodide electrophile; anisole-like aryl iodide.
+    brief_properties:
+    - aryl iodide
+    - methoxy substituent
+    - electron-donating substituent
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  COc1ccc(OC)c(P(C(C)(C)C)C(C)(C)C)c1-c1c(C(C)C)cc(C(C)C)cc1C(C)C:
+    original_value: COc1ccc(OC)c(P(C(C)(C)C)C(C)(C)C)c1-c1c(C(C)C)cc(C(C)C)cc1C(C)C
+    translated_description: Bulky electron-rich biaryl phosphine ligand with two tert-butyl groups on phosphorus, anisole
+      substituents, and a triisopropyl-substituted aryl ring.
+    brief_properties:
+    - bulky tertiary-alkyl phosphine center
+    - biaryl arylphosphine framework
+    - two methoxy substituents on one aryl ring
+    - highly hydrophobic, sterically demanding ligand
+    likely_role: bulky monodentate phosphine ligand for transition-metal catalysis
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  COc1ccc(OC)c(P([C@]23C[C@H]4C[C@H](C[C@H](C4)C2)C3)[C@]23C[C@H]4C[C@H](C[C@H](C4)C2)C3)c1-c1c(C(C)C)cc(C(C)C)cc1C(C)C:
+    original_value: COc1ccc(OC)c(P([C@]23C[C@H]4C[C@H](C[C@H](C4)C2)C3)[C@]23C[C@H]4C[C@H](C[C@H](C4)C2)C3)c1-c1c(C(C)C)cc(C(C)C)cc1C(C)C
+    translated_description: Bulky chiral triaryl/diadamantyl-type phosphine ligand featuring anisole-substituted biaryl character
+      and very sterically demanding polycyclic alkyl groups.
+    brief_properties:
+    - bulky phosphine center
+    - aryl anisole motifs
+    - rigid polycyclic/cage-like substituents
+    - likely strongly sterically demanding ligand
+    likely_role: chiral phosphine ligand for transition-metal catalysis
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  CataCXium A:
+    original_value: CataCXium A
+    translated_description: commercially named phosphine-type ligand; exact structure not specified by the name alone
+    brief_properties:
+    - brand/trade-name ligand
+    - likely used as a supporting ligand for transition-metal catalysis
+    - likely bulky and electronically tuning, as common for named phosphine ligands
+    likely_role: ligand for metal-catalyzed cross-coupling or related homogeneous catalysis
+    confidence: medium
+    columns_seen:
+    - ligand
+    source: llm_translation
+  Cc1cc(-c2ccccc2)on1:
+    original_value: Cc1cc(-c2ccccc2)on1
+    translated_description: A methyl- and phenyl-substituted isoxazole-type aromatic heterocycle.
+    brief_properties:
+    - aryl-substituted isoxazole-like heteroaromatic
+    - contains N–O five-membered ring
+    - phenyl substituent and methyl group
+    - neutral aromatic additive candidate
+    likely_role: additive or ligand-like heteroaromatic component used to modulate reaction conditions
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  Cc1cc(-n2cccc2)no1:
+    original_value: Cc1cc(-n2cccc2)no1
+    translated_description: A methyl-substituted N-linked heteroaromatic compound, recognizable as a pyrrole attached to an
+      isoxazole-like ring.
+    brief_properties:
+    - heteroaromatic additive
+    - contains isoxazole-like ring
+    - N-linked pyrrole motif
+    - neutral Lewis-basic nitrogens/oxygen
+    likely_role: small heteroaromatic additive/ligand-like modifier in reaction design
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  Cc1cc(C)on1:
+    original_value: Cc1cc(C)on1
+    translated_description: methyl-substituted isoxazole-like heteroaromatic additive
+    brief_properties:
+    - heteroaromatic five-membered ring
+    - contains N and O in an isoxazole-like motif
+    - methyl-substituted small heterocycle
+    likely_role: additive or small heteroaromatic modifier in reaction design
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  Cc1cc(on1)c2ccccc2:
+    original_value: Cc1cc(on1)c2ccccc2
+    translated_description: methyl and phenyl substituted isoxazole-like heteroarene additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - phenyl substituent
+    - methyl substituent
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  Cc1ccc(Nc2ccc(C(F)(F)F)cc2)cc1:
+    original_value: Cc1ccc(Nc2ccc(C(F)(F)F)cc2)cc1
+    translated_description: 'Diaryl amine scaffold: a p-tolyl group linked through NH to a trifluoromethyl-substituted phenyl
+      ring'
+    brief_properties:
+    - secondary arylamine motif
+    - two substituted benzene rings
+    - contains a trifluoromethyl (CF3) group
+    - hydrophobic, relatively lipophilic aromatic product
+    likely_role: product molecule / target arylamine scaffold
+    confidence: high
+    columns_seen:
+    - Product
+    source: llm_translation
+  Cc1ccno1:
+    original_value: Cc1ccno1
+    translated_description: small methyl-substituted five-membered N,O-heteroaromatic ring
+    brief_properties:
+    - aromatic N,O heterocycle
+    - methyl-substituted
+    - weakly basic / polar heteroatom donor
+    - small, relatively electron-rich additive
+    likely_role: heteroaromatic additive / possible ligand-like or base-modulating additive
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  Cc1ccon1:
+    original_value: Cc1ccon1
+    translated_description: SMILES-like string for a small methyl-substituted N/O heteroaromatic ring; likely an oxazole/isoxazole-type
+      additive.
+    brief_properties:
+    - heteroaromatic five-membered ring
+    - contains N and O atoms
+    - methyl-substituted oxazole/isoxazole-like motif
+    - small polar additive
+    likely_role: additive or heteroaromatic modifier in reaction screening; exact function unclear
+    confidence: medium
+    columns_seen:
+    - Additive
+    - Additive_SMILES
+    source: llm_translation
+  Cc1onc(C)c1:
+    original_value: Cc1onc(C)c1
+    translated_description: dimethyl-substituted isoxazole-like heteroarene additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - two methyl substituents
+    - small heteroarene
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  Cc1onc(c1)n2cccc2:
+    original_value: Cc1onc(c1)n2cccc2
+    translated_description: methyl-substituted isoxazole-like heteroarene bearing an N-linked pyridyl/azaaryl substituent.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - azaaryl substituent
+    - methyl substituent
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: low
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  Cc1oncc1:
+    original_value: Cc1oncc1
+    translated_description: methyl-substituted isoxazole-like heteroarene additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - methyl substituent
+    - small heteroarene
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  Clc1ccccn1:
+    original_value: Clc1ccccn1
+    translated_description: chlorinated pyridine-type heteroaromatic ring
+    brief_properties:
+    - aryl chloride motif
+    - six-membered N-heteroaromatic
+    - electron-poor aromatic ring
+    - possible cross-coupling electrophile
+    likely_role: heteroaryl halide reactant / electrophilic coupling partner
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    - Reactant2
+    source: llm_translation
+  Clc1cccnc1:
+    original_value: Clc1cccnc1
+    translated_description: chloropyridine-like heteroaryl chloride electrophile with a different pyridine substitution pattern.
+    brief_properties:
+    - heteroaryl chloride
+    - pyridine ring
+    - Lewis-basic nitrogen
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  CsF:
+    original_value: CsF
+    translated_description: cesium fluoride, an inorganic fluoride base/salt
+    brief_properties:
+    - alkali metal fluoride
+    - often basic and fluoride-delivering
+    - inorganic salt
+    - commonly used additive/base in cross-coupling or silyl-group chemistry
+    likely_role: base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  DMF:
+    original_value: DMF
+    translated_description: DMF, a common polar aprotic organic solvent
+    brief_properties:
+    - strongly polar aprotic solvent
+    - high boiling liquid
+    - good at dissolving salts and polar organics
+    - amide-type solvent
+    likely_role: solvent
+    confidence: high
+    columns_seen:
+    - solvent
+    source: llm_translation
+  Et3N:
+    original_value: Et3N
+    translated_description: triethylamine (Et3N), a common tertiary amine base
+    brief_properties:
+    - tertiary amine
+    - organic soluble base
+    - non-nucleophilic to mildly nucleophilic
+    - often used for acid scavenging
+    likely_role: base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  FC(F)(F)c1ccc(Br)cc1:
+    original_value: FC(F)(F)c1ccc(Br)cc1
+    translated_description: brominated trifluoromethylbenzene, likely a CF3-substituted aryl bromide
+    brief_properties:
+    - aryl bromide motif
+    - trifluoromethyl-substituted benzene
+    - electron-withdrawing CF3 group
+    - likely coupling-compatible electrophile
+    likely_role: aryl bromide reactant/electrophile used to introduce a trifluoromethyl-substituted aryl group
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    - Reactant2
+    source: llm_translation
+  FC(F)(F)c1ccc(Cl)cc1:
+    original_value: FC(F)(F)c1ccc(Cl)cc1
+    translated_description: chlorotrifluoromethylbenzene-type aromatic reactant
+    brief_properties:
+    - aryl chloride motif
+    - trifluoromethyl-substituted benzene
+    - electron-withdrawing CF3 group
+    - halogenated aromatic reactant
+    likely_role: halogenated arene coupling partner or substituted aromatic building block
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    - Reactant2
+    source: llm_translation
+  FC(F)(F)c1ccc(I)cc1:
+    original_value: FC(F)(F)c1ccc(I)cc1
+    translated_description: A trifluoromethyl-substituted iodobenzene, recognizable as an aryl iodide bearing a CF3 group.
+    brief_properties:
+    - aryl iodide electrophile/halide handle
+    - trifluoromethyl-substituted benzene
+    - electron-withdrawing CF3 group
+    - likely cross-coupling substrate
+    likely_role: Reactant2 likely serves as an aryl iodide coupling partner/electrophile in reaction design.
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    - Reactant2
+    source: llm_translation
+  Fc1cccc(F)c1-c1ccno1:
+    original_value: Fc1cccc(F)c1-c1ccno1
+    translated_description: Difluorophenyl linked to a five-membered N,O-containing heteroaromatic ring; a neutral fluorinated
+      heteroaryl biaryl additive.
+    brief_properties:
+    - fluorinated aryl–heteroaryl biaryl
+    - contains isoxazole-like five-membered N,O heteroarene
+    - neutral aromatic additive
+    - likely hydrophobic / π-stacking capable
+    likely_role: heteroaryl aromatic additive or ligand-like screening component
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  Fc1cccc(F)c1c2oncc2:
+    original_value: Fc1cccc(F)c1c2oncc2
+    translated_description: difluorophenyl-substituted isoxazole-like heteroarene additive/coupling partner.
+    brief_properties:
+    - isoxazole-like heteroarene
+    - difluoroaryl substituent
+    - electron-withdrawing fluorines
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  Ic1ccccn1:
+    original_value: Ic1ccccn1
+    translated_description: iodinated pyridine ring (iodopyridine-type heteroaryl halide)
+    brief_properties:
+    - six-membered aromatic N-heterocycle
+    - contains an aryl iodide bond
+    - electron-deficient heteroarene
+    - likely reactive electrophilic coupling partner
+    likely_role: heteroaryl halide reactant / electrophilic coupling partner
+    confidence: high
+    columns_seen:
+    - Aryl_halide_SMILES
+    - Reactant2
+    source: llm_translation
+  Ic1cccnc1:
+    original_value: Ic1cccnc1
+    translated_description: iodopyridine-like heteroaryl iodide electrophile with a different pyridine substitution pattern.
+    brief_properties:
+    - heteroaryl iodide
+    - pyridine ring
+    - Lewis-basic nitrogen
+    - oxidative-addition partner
+    likely_role: aryl halide electrophile for C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Aryl_halide_SMILES
+    source: manual_conservative_arylation_annotation
+  K3PO4:
+    original_value: K3PO4
+    translated_description: Potassium phosphate (tripotassium phosphate), an inorganic phosphate base.
+    brief_properties:
+    - inorganic potassium salt
+    - strong non-nucleophilic basicity
+    - phosphate anion
+    - commonly used as a mild-to-moderate base
+    likely_role: base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  KOH:
+    original_value: KOH
+    translated_description: potassium hydroxide
+    brief_properties:
+    - strong inorganic base
+    - caustic hydroxide salt
+    - commonly used for deprotonation or neutralization
+    likely_role: base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  LiOtBu:
+    original_value: LiOtBu
+    translated_description: lithium tert-butoxide (LiO-t-Bu), a sterically hindered alkoxide base
+    brief_properties:
+    - lithium alkoxide
+    - strong basic reagent
+    - sterically bulky tert-butoxide
+    - often weakly nucleophilic relative to less hindered alkoxides
+    likely_role: strong, non-nucleophilic base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  Ligand:
+    original_value: Ligand
+    translated_description: Generic ligand category or placeholder; indicates a coordinating additive without specifying identity.
+    brief_properties:
+    - non-specific label
+    - likely metal-coordinating
+    - electronic/steric effects depend on identity
+    likely_role: Ligand choice used to tune catalyst coordination environment and reactivity/selectivity.
+    confidence: high
+    columns_seen:
+    - feature_columns
+    source: llm_translation
+  MeCN:
+    original_value: MeCN
+    translated_description: acetonitrile (commonly abbreviated MeCN)
+    brief_properties:
+    - polar aprotic solvent
+    - contains a nitrile group
+    - often used as a medium-polarity reaction solvent
+    likely_role: solvent
+    confidence: high
+    columns_seen:
+    - solvent
+    source: llm_translation
+  MeOH:
+    original_value: MeOH
+    translated_description: methanol
+    brief_properties:
+    - small polar protic alcohol
+    - hydrogen-bond donor and acceptor
+    - commonly used organic solvent
+    likely_role: solvent
+    confidence: high
+    columns_seen:
+    - solvent
+    source: llm_translation
+  MeOH/H2O_V2 9:1:
+    original_value: MeOH/H2O_V2 9:1
+    translated_description: Methanol/water solvent mixture, approximately 9:1 ratio; "V2" likely denotes a variant or internal
+      label
+    brief_properties:
+    - polar protic mixed solvent
+    - mostly methanol with some water
+    - can enhance substrate/reagent solubility balance
+    - internal variant label present
+    likely_role: reaction solvent mixture
+    confidence: high
+    columns_seen:
+    - solvent
+    source: llm_translation
+  N-[dimethylamino-ethylimino-[[tris(dimethylamino)-lambda5-phosphanylidene]amino]-lambda5-phosphanyl]-N-methylmethanamine:
+    original_value: N-[dimethylamino-ethylimino-[[tris(dimethylamino)-lambda5-phosphanylidene]amino]-lambda5-phosphanyl]-N-methylmethanamine
+    translated_description: A highly substituted aminophosphorus compound with multiple dimethylamino groups and phosphanyl/phosphorane-like
+      motifs; likely a strong donor ligand or phosphorus-based base/additive.
+    brief_properties:
+    - multiple dimethylamino donors
+    - phosphorus-rich, highly functionalized
+    - strongly electron-donating / basic character likely
+    - sterically crowded amine/phosphorus motif
+    likely_role: ligand, base, or activating/additive species in reaction design
+    confidence: medium
+    columns_seen:
+    - Base
+    source: llm_translation
+  NaHCO3:
+    original_value: NaHCO3
+    translated_description: sodium bicarbonate (baking soda), a mild inorganic base
+    brief_properties:
+    - alkali metal bicarbonate salt
+    - weakly basic
+    - often acid scavenger or pH buffer
+    - inorganic, non-nucleophilic additive
+    likely_role: base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  NaOH:
+    original_value: NaOH
+    translated_description: sodium hydroxide, a strong inorganic base
+    brief_properties:
+    - alkali metal hydroxide
+    - strongly basic
+    - caustic/corrosive
+    - common deprotonating or neutralizing agent
+    likely_role: inorganic base
+    confidence: high
+    columns_seen:
+    - base
+    source: llm_translation
+  P(Cy)3:
+    original_value: P(Cy)3
+    translated_description: Tricyclohexylphosphine; a trialkylphosphine ligand with three cyclohexyl groups
+    brief_properties:
+    - bulky phosphine ligand
+    - strong electron-donating trialkylphosphine
+    - neutral monodentate donor
+    - often used to tune metal catalyst reactivity
+    likely_role: ligand
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  P(Ph)3:
+    original_value: P(Ph)3
+    translated_description: Triphenylphosphine-type phosphine ligand notation
+    brief_properties:
+    - triaryl phosphine motif
+    - neutral phosphorus donor
+    - bulky/aromatic substituents
+    - common transition-metal supporting ligand
+    likely_role: ligand
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  P(o-Tol)3:
+    original_value: P(o-Tol)3
+    translated_description: tri(o-tolyl)phosphine; a triaryl phosphine ligand with ortho-methyl-substituted tolyl groups
+    brief_properties:
+    - triaryl phosphine
+    - ortho-methyl aryl substituents
+    - likely bulky donor ligand
+    - neutral phosphorus donor
+    likely_role: phosphine ligand for a metal catalyst
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  P(tBu)3:
+    original_value: P(tBu)3
+    translated_description: tri-tert-butylphosphine; a very bulky trialkyl phosphine ligand
+    brief_properties:
+    - tertiary phosphine
+    - strong steric bulk from tert-butyl groups
+    - electron-rich donor
+    - commonly used as a metal-coordinating ligand
+    likely_role: ligand for a metal catalyst or precatalyst
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  Pd(OAc)2:
+    original_value: Pd(OAc)2
+    translated_description: palladium(II) acetate; a palladium source commonly used as a catalyst precursor
+    brief_properties:
+    - Pd(II) metal complex
+    - acetate ligands present
+    - often used as a precatalyst
+    - typical transition-metal coupling/oxidation catalyst cue
+    likely_role: catalyst
+    confidence: high
+    columns_seen:
+    - catalyst
+    source: llm_translation
+  Reactant2:
+    original_value: Reactant2
+    translated_description: Placeholder label for the second reactant input in a reaction record; not a specific chemical
+      substance.
+    brief_properties:
+    - dataset/column-style identifier
+    - no explicit structure encoded
+    - context-dependent chemical identity
+    - likely varies by experiment
+    likely_role: second reactant slot in reaction design metadata
+    confidence: high
+    columns_seen:
+    - feature_columns
+    source: llm_translation
+  SPhos:
+    original_value: SPhos
+    translated_description: Named phosphine ligand commonly used in transition-metal catalysis, especially palladium-based
+      coupling chemistry
+    brief_properties:
+    - bulky biaryl phosphine motif
+    - electron-rich phosphine donor
+    - often paired with Pd catalysts
+    - commonly used to promote cross-coupling
+    likely_role: ligand
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  THF:
+    original_value: THF
+    translated_description: Tetrahydrofuran (THF), a common ethereal organic solvent
+    brief_properties:
+    - polar aprotic ether
+    - cyclic five-membered ring solvent
+    - good solubility for many organic and organometallic species
+    - coordinating donor solvent
+    likely_role: solvent
+    confidence: high
+    columns_seen:
+    - solvent
+    source: llm_translation
+  THF_V2:
+    original_value: THF_V2
+    translated_description: THF variant 2; likely tetrahydrofuran-based solvent entry with an internal version label
+    brief_properties:
+    - ether solvent motif
+    - aprotic/polar organic medium
+    - version-coded label suggests dataset-specific variant
+    - exact formulation unspecified
+    likely_role: solvent
+    confidence: medium
+    columns_seen:
+    - solvent
+    source: llm_translation
+  XPhos:
+    original_value: XPhos
+    translated_description: XPhos ligand; a named phosphine ligand commonly used in transition-metal catalysis
+    brief_properties:
+    - bulky biaryl phosphine motif
+    - electron-rich phosphine donor
+    - commonly paired with palladium catalysts
+    - often tuned for cross-coupling reactivity
+    likely_role: ligand for a transition-metal catalyst, especially in cross-coupling reactions
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  Xantphos:
+    original_value: Xantphos
+    translated_description: Named bidentate diphosphine ligand, commonly used as a wide-bite-angle phosphorus donor in metal-catalyzed
+      reactions.
+    brief_properties:
+    - diphosphine donor ligand
+    - chelating/bidentate
+    - wide bite angle
+    - commonly paired with Pd, Ni, or Rh catalysts
+    likely_role: ligand for transition-metal catalysis
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  Yield:
+    original_value: Yield
+    translated_description: Reaction yield; the amount of desired product obtained, typically reported as a percentage.
+    brief_properties:
+    - non-substance outcome term
+    - commonly reported as percent
+    - depends on reaction efficiency
+    likely_role: reaction outcome metric
+    confidence: high
+    columns_seen:
+    - target_column
+    source: llm_translation
+  bis(1-adamantyl)-[3,6-dimethoxy-2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane:
+    original_value: bis(1-adamantyl)-[3,6-dimethoxy-2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane
+    translated_description: Bulky triaryl phosphane ligand bearing two adamantyl groups and methoxy-substituted aryl rings
+    brief_properties:
+    - sterically very bulky phosphine
+    - electron-rich donor
+    - aryl ether/methoxy substituents
+    - common ligand scaffold for metal catalysis
+    likely_role: ligand for tuning metal center electronics and steric environment in catalysis
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  buchwald_hartwig_amination:
+    original_value: buchwald_hartwig_amination
+    translated_description: Buchwald-Hartwig amination reaction type; a named coupling used to form C-N bonds, commonly aryl
+      amination.
+    brief_properties:
+    - named cross-coupling reaction
+    - C-N bond formation
+    - often palladium-catalyzed
+    - aryl amination motif
+    likely_role: reaction class or transformation type
+    confidence: high
+    columns_seen:
+    - reaction_type
+    source: llm_translation
+  buchwald_task_1:
+    original_value: buchwald_task_1
+    translated_description: Identifier for a Buchwald-related task or dataset entry; this appears to be a metadata label,
+      not a chemical substance.
+    brief_properties:
+    - named task/dataset identifier
+    - not a chemical structure string
+    - likely encodes an experimental subset or benchmark
+    likely_role: dataset label or reaction task identifier rather than a reagent/condition
+    confidence: high
+    columns_seen:
+    - dataset_name
+    source: llm_translation
+  c1ccc(-c2ccno2)cc1:
+    original_value: c1ccc(-c2ccno2)cc1
+    translated_description: Phenyl-substituted five-membered N,O-heteroaromatic ring (likely an isoxazole-type motif).
+    brief_properties:
+    - biaryl-like aromatic heterocycle
+    - contains an isoxazole ring
+    - neutral, relatively hydrophobic scaffold
+    - likely weakly coordinating heteroatom motif
+    likely_role: heteroaromatic additive or ligand-like additive scaffold
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  c1ccc(-c2ccon2)cc1:
+    original_value: c1ccc(-c2ccon2)cc1
+    translated_description: Phenyl-substituted five-membered O/N heteroaromatic compound (isoxazole-like motif); a neutral
+      aromatic additive with modest heteroatom coordination potential.
+    brief_properties:
+    - aryl–heteroaryl framework
+    - contains a 5-membered O/N heteroaromatic ring
+    - neutral, unsaturated aromatic additive
+    - likely weakly coordinating / polarity-modulating
+    likely_role: heteroaromatic additive or ligand-like modifier in reaction optimization
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  c1ccc(-c2cnoc2)cc1:
+    original_value: c1ccc(-c2cnoc2)cc1
+    translated_description: aryl heterocycle additive; a phenyl-substituted five-membered N,O-heteroaromatic ring
+    brief_properties:
+    - contains a phenyl ring
+    - five-membered aromatic N,O-heterocycle
+    - neutral, heteroatom-bearing aromatic scaffold
+    - could weakly coordinate or modulate polarity
+    likely_role: heteroaromatic additive or ligand-like modulator
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  c1ccc(CN(Cc2ccccc2)c2ccno2)cc1:
+    original_value: c1ccc(CN(Cc2ccccc2)c2ccno2)cc1
+    translated_description: A tertiary benzylic amine bearing two phenyl groups and a five-membered N,O-containing heteroaryl
+      ring; likely a neutral aromatic additive with donor/basic character.
+    brief_properties:
+    - tertiary amine center
+    - two benzyl/aryl substituents
+    - five-membered N,O-heteroaryl ring
+    - neutral aromatic organic additive
+    likely_role: organic base or ligand-like additive
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  c1ccc(CN(Cc2ccccc2)c2ccon2)cc1:
+    original_value: c1ccc(CN(Cc2ccccc2)c2ccon2)cc1
+    translated_description: benzyl-substituted tertiary amine bearing a fused/heteroaryl-like ring fragment
+    brief_properties:
+    - tertiary amine center
+    - two benzyl/aryl-methyl substituents
+    - contains a small N/O-containing aromatic heterocycle
+    - likely basic and fairly lipophilic
+    likely_role: organic additive or ligand-like base/modulator
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  c1ccc2nocc2c1:
+    original_value: c1ccc2nocc2c1
+    translated_description: Fused benzene–N,O heteroaromatic ring system (benzoxazole/isoxazole-like heteroarene); a neutral
+      aromatic additive with N/O heteroatoms.
+    brief_properties:
+    - benzene-fused five-membered N,O heteroaromatic ring
+    - planar aromatic heterocycle
+    - neutral nitrogen/oxygen donor sites
+    - likely relatively electron-deficient heteroarene
+    likely_role: heteroaromatic additive or ligand-like additive
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  c1ccc2oncc2c1:
+    original_value: c1ccc2oncc2c1
+    translated_description: A fused bicyclic O,N-containing heteroaromatic scaffold, consistent with a benzisoxazole-type
+      motif.
+    brief_properties:
+    - fused benzene–isoxazole-like heteroaromatic motif
+    - contains adjacent O and N heteroatoms in five-membered ring
+    - rigid bicyclic aromatic system
+    - likely weakly coordinating/basic heteroarene
+    likely_role: additive or heteroaromatic ligand-like additive that may modulate metal coordination or reaction environment
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  categorical_option_coverage:
+    original_value: categorical_option_coverage
+    translated_description: A non-structural categorical label indicating coverage of available options, not an identifiable
+      chemical reactant.
+    brief_properties:
+    - not a chemical structure
+    - dataset/category metadata
+    - coverage-related option label
+    likely_role: Most likely a placeholder or categorical metadata value for Reactant2 selection/coverage rather than an actual
+      reactant.
+    confidence: high
+    columns_seen:
+    - Reactant2
+    source: llm_translation
+  dicyclohexyl-[2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane:
+    original_value: dicyclohexyl-[2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane
+    translated_description: Bulky biaryl phosphine ligand with cyclohexyl and 2,4,6-triisopropylphenyl substituents
+    brief_properties:
+    - sterically crowded phosphine
+    - electron-rich P donor
+    - bulky aryl/cyclohexyl groups
+    - likely air-sensitive ligand
+    likely_role: ligand for metal-catalyzed coupling or C–C/C–X activation
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  ditert-butyl-[2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane:
+    original_value: ditert-butyl-[2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane
+    translated_description: A very bulky triisopropyl-substituted biaryl phosphine ligand
+    brief_properties:
+    - tertiary phosphine
+    - bulky aryl/phosphorus center
+    - strongly sterically demanding
+    - likely electron-rich ligand
+    likely_role: Ligand for transition-metal catalysis; used to tune reactivity, sterics, and selectivity
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  ditert-butyl-[3,6-dimethoxy-2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane:
+    original_value: ditert-butyl-[3,6-dimethoxy-2-[2,4,6-tri(propan-2-yl)phenyl]phenyl]phosphane
+    translated_description: Bulky electron-rich aryl phosphine ligand with two methoxy groups and a heavily substituted aryl
+      ring
+    brief_properties:
+    - sterically bulky phosphine
+    - electron-donating methoxy substituents
+    - hindered aryl framework
+    - likely air-sensitive phosphorus ligand
+    likely_role: ligand for transition-metal catalysis; tunes electron density and sterics at the metal center
+    confidence: high
+    columns_seen:
+    - Ligand
+    source: llm_translation
+  dppf:
+    original_value: dppf
+    translated_description: Common shorthand for a ferrocene-based diphosphine ligand (often 1,1'-bis(diphenylphosphino)ferrocene).
+    brief_properties:
+    - bidentate phosphine ligand
+    - ferrocene backbone
+    - chelating, relatively bulky donor
+    - often used with transition-metal catalysts
+    likely_role: ligand
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  dtbpf:
+    original_value: dtbpf
+    translated_description: Likely a shorthand ligand code, plausibly a bulky phosphine-type ligand; exact identity is not
+      certain from the string alone.
+    brief_properties:
+    - short acronym-style ligand label
+    - likely sterically bulky
+    - commonly used as a supporting ligand
+    - exact structure unclear from abbreviation alone
+    likely_role: ligand
+    confidence: medium
+    columns_seen:
+    - ligand
+    source: llm_translation
+  ethyl 1,2-oxazole-3-carboxylate:
+    original_value: ethyl 1,2-oxazole-3-carboxylate
+    translated_description: An ethyl ester of an oxazole carboxylic acid.
+    brief_properties:
+    - heteroaromatic oxazole ring
+    - ester functional group
+    - moderately polar, neutral
+    likely_role: heteroaromatic additive or small-molecule substrate analogue
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  ethyl 1,2-oxazole-4-carboxylate:
+    original_value: ethyl 1,2-oxazole-4-carboxylate
+    translated_description: An ethyl ester of an oxazole-carboxylic acid; a small aromatic heterocycle bearing an ester group.
+    brief_properties:
+    - oxazole heteroaromatic ring
+    - ethyl ester functionality
+    - polar but neutral
+    - possible ligand/solubility-modifying additive
+    likely_role: heteroaromatic additive or substrate-like small molecule used to tune reaction outcomes
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  ethyl 3-methoxy-1,2-oxazole-5-carboxylate:
+    original_value: ethyl 3-methoxy-1,2-oxazole-5-carboxylate
+    translated_description: An ethyl ester of a methoxy-substituted isoxazole/oxazole carboxylate
+    brief_properties:
+    - heteroaromatic ring
+    - ethyl ester functionality
+    - methoxy substituent
+    - polar but neutral additive-like organic molecule
+    likely_role: small organic additive or ligand-like heteroaromatic component
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  ethyl 3-methyl-1,2-oxazole-5-carboxylate:
+    original_value: ethyl 3-methyl-1,2-oxazole-5-carboxylate
+    translated_description: An ethyl ester of a methyl-substituted 1,2-oxazole (isoxazole) carboxylic acid.
+    brief_properties:
+    - heteroaromatic ring
+    - ethyl ester functionality
+    - methyl-substituted ring
+    - polar but neutral small molecule
+    likely_role: additive or small heteroaromatic co-solvent/ligand-like additive
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  ethyl 5-methyl-1,2-oxazole-3-carboxylate:
+    original_value: ethyl 5-methyl-1,2-oxazole-3-carboxylate
+    translated_description: Ethyl ester of a methyl-substituted isoxazole carboxylic acid
+    brief_properties:
+    - heteroaromatic isoxazole ring
+    - ethyl ester functional group
+    - small, neutral organic additive-like molecule
+    likely_role: structural additive or ligand-like small molecule in reaction design
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  ethyl 5-methyl-1,2-oxazole-4-carboxylate:
+    original_value: ethyl 5-methyl-1,2-oxazole-4-carboxylate
+    translated_description: An ethyl ester of a 5-methyl isoxazole-4-carboxylic acid derivative.
+    brief_properties:
+    - heteroaromatic isoxazole ring
+    - ester functionality
+    - small methyl substituent
+    - moderately polar, likely neutral
+    likely_role: Small heteroaryl additive or building-block-like organic modifier in reaction design
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  finite_pool:
+    original_value: finite_pool
+    translated_description: Indicates a finite available pool of options or material rather than a specific chemical entity.
+    brief_properties:
+    - generic resource-limitation term
+    - non-structural descriptor
+    - suggests bounded availability
+    likely_role: dataset or search-space constraint describing a limited set of allowed candidates/resources
+    confidence: high
+    columns_seen:
+    - backend
+    source: llm_translation
+  maximize:
+    original_value: maximize
+    translated_description: Instruction to optimize conditions toward the highest achievable value of the target metric or
+      outcome.
+    brief_properties:
+    - optimization directive
+    - non-chemical keyword
+    - indicates preference toward highest outcome
+    likely_role: objective/selection criterion in reaction optimization or workflow settings
+    confidence: high
+    columns_seen:
+    - goal
+    source: llm_translation
+  methyl 1,2-oxazole-5-carboxylate:
+    original_value: methyl 1,2-oxazole-5-carboxylate
+    translated_description: A methyl ester of a 1,2-oxazole (isoxazole) carboxylic acid; a small heteroaromatic ester
+    brief_properties:
+    - heteroaromatic ring
+    - methyl ester functionality
+    - electron-poor aromatic motif
+    - potential H-bond acceptors
+    likely_role: small-molecule additive or heteroaryl building block; may tune polarity or coordination in reaction design
+    confidence: high
+    columns_seen:
+    - Additive
+    source: llm_translation
+  methyl 5-(furan-2-yl)-1,2-oxazole-3-carboxylate:
+    original_value: methyl 5-(furan-2-yl)-1,2-oxazole-3-carboxylate
+    translated_description: A methyl ester of a furan-substituted isoxazole (oxazole) carboxylate.
+    brief_properties:
+    - heteroaryl ester
+    - furan ring present
+    - electron-poor aromatic heterocycle
+    - small polar organic additive
+    likely_role: heteroaryl building block or assay/additive component in reaction screening
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  methyl 5-thiophen-2-yl-1,2-oxazole-3-carboxylate:
+    original_value: methyl 5-thiophen-2-yl-1,2-oxazole-3-carboxylate
+    translated_description: A methyl ester of a thiophene-substituted isoxazole/carboxylate aromatic heterocycle
+    brief_properties:
+    - heteroaromatic ring system
+    - methyl ester functional group
+    - thiophene substituent
+    - likely neutral, moderately lipophilic
+    likely_role: small-molecule additive or heteroaromatic tuning component
+    confidence: medium
+    columns_seen:
+    - Additive
+    source: llm_translation
+  nothing:
+    original_value: nothing
+    translated_description: No ligand added
+    brief_properties:
+    - absence of ligand
+    - unligated conditions
+    - may rely on substrate/solvent/background coordination
+    likely_role: ligand condition indicating no intentional ligand is present
+    confidence: high
+    columns_seen:
+    - ligand
+    source: llm_translation
+  o1cc(cn1)c2ccccc2:
+    original_value: o1cc(cn1)c2ccccc2
+    translated_description: phenyl-substituted N/O heteroarene additive/coupling partner with a different substitution pattern.
+    brief_properties:
+    - N/O heteroarene
+    - phenyl substituent
+    - aromatic additive
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  o1cc2ccccc2n1:
+    original_value: o1cc2ccccc2n1
+    translated_description: benzannulated N/O heteroarene additive/coupling partner with alternate N/O placement.
+    brief_properties:
+    - fused aromatic heteroarene
+    - N/O heteroatoms
+    - more extended pi system
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  o1ccc(n1)c2ccccc2:
+    original_value: o1ccc(n1)c2ccccc2
+    translated_description: phenyl-substituted N/O heteroarene additive/coupling partner with an alternate heteroatom arrangement.
+    brief_properties:
+    - N/O heteroarene
+    - phenyl substituent
+    - aromatic additive
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  o1ncc2ccccc12:
+    original_value: o1ncc2ccccc12
+    translated_description: benzannulated N/O heteroarene additive/coupling partner.
+    brief_properties:
+    - fused aromatic heteroarene
+    - N/O heteroatoms
+    - more extended pi system
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation
+  o1nccc1c2ccccc2:
+    original_value: o1nccc1c2ccccc2
+    translated_description: phenyl-substituted N/O heteroarene additive/coupling partner.
+    brief_properties:
+    - N/O heteroarene
+    - phenyl substituent
+    - aromatic additive
+    - C-H arylation partner
+    likely_role: heteroarene/additive coupling partner in C-H arylation benchmark
+    confidence: medium
+    columns_seen:
+    - Additive_SMILES
+    source: manual_conservative_arylation_annotation

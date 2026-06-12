@@ -1,0 +1,26 @@
+services:
+  trace-lab:
+    build:
+      context: .
+    image: trace-collab-lab:latest
+    container_name: trace-collab-lab-run
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8788:8788"
+    volumes:
+      - ./runs/lab_projects:/app/runs/lab_projects
+      - ./.uploads:/app/.uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8788/api/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

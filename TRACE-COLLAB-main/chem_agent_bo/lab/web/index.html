@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TRACE Lab</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">T</div>
+          <div>
+            <h1>TRACE Lab</h1>
+            <p>Batch ask/tell optimization for real experiments</p>
+          </div>
+        </div>
+
+        <section class="panel">
+          <h2>Project</h2>
+          <label>
+            Project ID
+            <input id="projectId" value="oxidative_esterification_demo" />
+          </label>
+          <div class="button-row">
+            <button id="loadProject">Load</button>
+            <button id="refreshProjects" class="secondary">Projects</button>
+          </div>
+          <label>
+            Batch size
+            <input id="batchSize" type="number" min="1" max="48" value="6" />
+          </label>
+          <label>
+            Planner
+            <select id="plannerName">
+              <option value="">Project default</option>
+              <option value="atlas">Atlas</option>
+              <option value="random">Random</option>
+            </select>
+          </label>
+          <label>
+            Controller
+            <select id="controllerMode">
+              <option value="">Project default</option>
+              <option value="agentic">Agentic TRACE</option>
+              <option value="bo_only">BO only</option>
+            </select>
+          </label>
+          <button id="askButton" class="primary" disabled>Generate Batch</button>
+          <label class="inline-check">
+            <input id="keepHistoricalOnReset" type="checkbox" checked />
+            Keep historical observations on reset
+          </label>
+          <button id="resetProject" class="danger" disabled>Reset Run State</button>
+          <p class="hint">Debug reset keeps project setup and backs up cleared run state.</p>
+          <p id="statusText" class="status">Ready.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Create From CSV</h2>
+          <p class="hint">Upload a normalized design-space CSV with columns variable,type,value.</p>
+          <label>
+            Project ID
+            <input id="newProjectId" placeholder="new_project" />
+          </label>
+          <label>
+            Objective
+            <input id="objectiveName" value="yield" />
+          </label>
+          <label class="file-picker">
+            Design space CSV
+            <input id="designCsv" type="file" accept=".csv,text/csv" />
+          </label>
+          <button id="createProject" class="secondary" disabled>Create Project</button>
+        </section>
+
+        <section class="panel">
+          <h2>Historical Data</h2>
+          <p class="hint">Import measured rows before asking TRACE for the next batch.</p>
+          <label class="file-picker">
+            Observations CSV
+            <input id="historicalCsv" type="file" accept=".csv,text/csv" />
+          </label>
+          <button id="importHistorical" class="secondary" disabled>Import Historical</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="top-strip">
+          <div>
+            <p class="eyebrow">Real-Lab TRACE</p>
+            <h2 id="projectTitle">No project loaded</h2>
+            <p id="projectMeta" class="project-meta">Load a project to inspect the current stage and setup.</p>
+          </div>
+          <div id="bestChip" class="metric-chip">best: n/a</div>
+        </section>
+
+        <section class="grid">
+          <article class="card span-2">
+            <div class="card-head">
+              <h3>Design Space</h3>
+              <span id="spaceMeta"></span>
+            </div>
+            <div id="designSpace" class="table-wrap empty">Load a project to inspect variables.</div>
+          </article>
+
+          <article class="card span-2">
+            <div class="card-head">
+              <h3>Latest Recommendations</h3>
+              <div class="button-row">
+                <button id="reloadRecommendations" class="secondary" disabled>Reload</button>
+                <button id="exportRecommendations" class="secondary" disabled>Export CSV</button>
+                <button id="submitResults" class="primary" disabled>Submit Results</button>
+              </div>
+            </div>
+            <div id="batchSummary" class="batch-summary empty">Generate a batch to see the batch strategy.</div>
+            <div id="recommendations" class="table-wrap empty">Generate a batch to see recommendations.</div>
+          </article>
+
+          <article class="card span-2">
+            <div class="card-head">
+              <h3>Observations</h3>
+              <button id="reloadObservations" class="secondary" disabled>Reload</button>
+            </div>
+            <div id="observations" class="table-wrap empty">No observations loaded.</div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

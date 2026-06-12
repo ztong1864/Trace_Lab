@@ -1,0 +1,7 @@
+interface:
+  display_name: "TRACE-COLLAB Lab"
+  short_description: "Run TRACE Lab ask/tell candidate recommendation workflows."
+  default_prompt: "Use $trace-collab-skill to generate TRACE Lab candidates, submit experiment results, and recommend the next batch."
+
+policy:
+  allow_implicit_invocation: true

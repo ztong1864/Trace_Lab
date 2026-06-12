@@ -1,0 +1,256 @@
+# Agentic BO 主配置文件
+# 说明：
+# - 这是当前实验主入口使用的统一配置文件。
+# - 优先把常用参数写在这里，避免把配置拆得到处都是。
+# - 如无必要，不要让程序自动改写这个文件，以免中文注释丢失。
+
+runtime:
+  env_profile: atlas  # 运行环境：atlas / chembo。当前 agent 主路径默认 atlas。
+  model_name: gpt-5.4-mini  # 默认使用的 LLM 模型。
+  api_base: null  # 为空时走环境变量 OPENAI_BASE_URL / OPENAI_BASE_URL。
+  temperature: 0.0  # 默认保持 0，保证实验可复现性更强。
+  llm_timeout_sec: 60.0  # 单次 LLM 请求超时（秒）；实验期适度放宽，减少早期网关抖动。
+  llm_request_max_retries: 5  # 底层请求失败时的重试次数。
+  llm_structured_retry_attempts: 5  # 结构化输出失败时的应用层重试次数。
+  llm_retry_backoff_sec: 2.5  # 结构化重试的退避时间基数。
+  llm_retry_max_backoff_sec: 20.0  # 结构化重试的最大退避时间。
+  llm_retry_jitter_sec: 0.75  # 结构化重试的随机抖动，降低一开始集中失败。
+  llm_fallback_model_name: gpt-5.4-mini  # 仅在连接/网关类错误连续失败后启用的备用模型。
+  llm_fallback_attempts: 2  # 备用模型的额外尝试次数。
+  llm_fail_on_nonretryable_error: true  # 对鉴权/配额/参数错误等非连接类问题直接失败，避免静默退化成非 LLM 路径。
+  llm_pricing_profile: auto  # 成本估算 profile。
+  llm_input_cost_per_1m: null  # 自定义输入 token 单价；通常留空。
+  llm_output_cost_per_1m: null  # 自定义输出 token 单价；通常留空。
+  llm_cached_input_cost_per_1m: null  # 自定义 cached input 单价；通常留空。
+
+experiment:
+  dataset: suzuki_hte_full  # 默认数据集；shell 与 Python 入口都应统一使用这里。
+  budget: 20  # 兼容旧逻辑的总预算别名；若 total_budget 为空会参与推导。
+  total_budget: null  # 总实验预算；为空时由 budget 推导。
+  num_init_design: 5  # 旧接口中的初始化设计轮数参数。
+  init_budget: null  # 初始化实验数；为空时由 num_init_design 推导。
+  seed: 7  # 随机种子。
+  output_dir: runs/agentic_bo  # 输出目录。
+  planner_name: atlas  # 默认 BO planner。
+  enable_workflow_report: true  # 是否输出 decision_flow / override_report。
+  workflow_report_format: json  # json 或 json+md。
+  enable_knowledge: false  # 是否启用知识库检索。
+  knowledge_local_dir: knowledge/local  # 本地知识源目录。
+  knowledge_rules_dir: knowledge/curated_rules  # 规则知识目录。
+  knowledge_db_dir: knowledge/lancedb  # 旧 LanceDB 存储目录；当前默认不再使用。
+  knowledge_table_name: knowledge_units  # LanceDB 表名。
+  knowledge_backend: qdrant  # qdrant / lancedb；默认避免生成已弃用的 LanceDB 本地库。
+  enable_qdrant_documents: false  # qdrant backend 下是否启用文档检索；默认只用 curated/reviewed knowledge。
+  qdrant_url: http://localhost:6333  # Qdrant 服务地址。
+  qdrant_collection: chem_documents  # Qdrant collection 名称。
+  qdrant_dense_model: BAAI/bge-small-en-v1.5  # 混合检索 dense embedding 模型。
+  qdrant_sparse_model: Qdrant/bm25  # 混合检索 sparse 模型。
+  knowledge_bootstrap: true  # 是否在启动时导入本地知识到数据库。
+  enable_long_term_memory: false  # 是否启用长期记忆。
+  long_term_memory_path: knowledge/long_term_memory.json  # 长期记忆后备 JSON 路径。
+  enable_audit_artifacts: true  # 是否保存每轮 artifact。
+  audit_artifact_dir: null  # 可选自定义 artifact 输出目录。
+  init_strategy: random  # random / llm。
+  protocol_mode: benchmark_clean  # benchmark_clean / benchmark_transfer / deployment。
+  enable_reviewed_knowledge: true  # v0.5.3: 启用可审阅知识层。
+  reviewed_knowledge_dir: knowledge/reviewed  # reviewed knowledge cards 目录。
+  reviewed_knowledge_top_k: 3  # 每个节点最多读取多少条 reviewed knowledge。
+  init_reviewed_knowledge_mode: advisory  # M4: init 节点先以 advisory 方式接入 reviewed knowledge。
+  diagnosis_reviewed_knowledge_mode: decision_active  # M4: diagnosis 节点允许审核后的知识/经验进入主决策。
+  semantic_reviewed_knowledge_mode: advisory  # semantic / reflection 暂保守接入。
+  verification_mode: advisory  # verification pass 先做 advisory，不改 proposal 主权。
+  reviewed_knowledge_advisory_content_statuses: [seed_placeholder, pinned_curated, reviewed_curated, revised_curated]
+  reviewed_knowledge_decision_content_statuses: [pinned_curated, reviewed_curated, revised_curated]
+  reviewed_knowledge_target_nodes: [design_init_experiments, stagnation_diagnosis, hypothesis_action, semantic_assessment, reflection_action, verification_pass]  # M4: init / diagnosis / semantic / verification。
+  enable_reviewed_experience: true  # M4: diagnosis 可读审核后的 benchmark-safe experience。
+  reviewed_experience_dir: knowledge/reviewed_experience
+  reviewed_experience_top_k: 2
+  enable_episodic_review_queue: true  # 是否生成 run-local episodic review queue。
+  episodic_review_queue_path: null  # 为空时默认写到当前 run 的 artifacts 下。
+  enable_knowledge_hit_ledger: true  # 记录紧凑 knowledge hit ledger，只保存命中元数据，不做在线价值裁决。
+  knowledge_hit_ledger_path: null  # 为空时默认写到当前 run 的 artifacts/knowledge_hit_ledger.jsonl。
+  terminal_verbosity: progress  # quiet / progress / debug；默认终端只输出关键进度。
+  suppress_third_party_output: true  # 默认把 Atlas/BoTorch 等库输出收进 run 日志，避免刷屏。
+
+orchestrator:
+  budget: 20
+  total_budget: null
+  init_budget: null
+  max_feasibility_retries: 1
+  enable_auto_subspace_trigger: true
+  subspace_window_rounds: 3
+  stagnation_threshold: 0.3  # 停滞判定阈值。
+  duplicate_threshold: 0.35  # 候选重复率阈值。
+  coverage_threshold: 0.4  # 覆盖率不足阈值。
+  enable_multigranularity_lock_signals: false  # 是否启用单轴 sweep / anchor repeat / key-dim concentration 等局部锁死信号。
+  controller_allow_rerank_without_space_narrowing: false  # 是否允许在 keep_full_space 前提下仍触发 full-space shortlist rerank。
+  finite_pool_sparse_coverage_not_veto_rerank: false  # 在大 finite-pool 中，低 visited fraction 是否不再自动否决 rerank。
+  key_dim_coverage_mode: mean  # mean / min_key_dim / weighted_key_dim；决定 coverage_low 的判定口径。
+  controller_reflection_input_mode: full  # full / structured；controller 是否读取压缩后的结构化 reflection 视图。
+  shortlist_size: 5
+  shortlist_candidate_pool_size: 12
+  shortlist_main_pool_size: 8
+  shortlist_diversity_pool_size: 6
+  shortlist_top_rank_keep: 2
+  shortlist_min_scaffold_diversity: 2
+  shortlist_target_scaffold_diversity: 3
+  shortlist_early_diversity_scaffold_threshold: 0.67
+  shortlist_early_diversity_no_improvement_rounds: 2
+  enable_override_guardrail: true
+  override_score_margin: 0.05
+  override_min_transfer_score: 0.65
+  override_require_structural_shift: true
+  planner_trust_policy: auto
+  planner_action_policies:
+    discrete:
+      supports_problem_shaping: true
+      supports_shortlist_probe: false
+      default_selection_authority_level: planner_only
+      allowed_mainline_actions: [direct_bo_pick, shape_only_bo_pick, mask_low_repeat_resuggest, mask_dominant_resuggest, mask_scaffold_corridor_resuggest]
+      allowed_rare_actions: [shape_then_probe_topk, shortlist_alt_pick, focused_shortlist_alt_pick]
+      allowed_prompt_styles: [default, shape_only, resuggest_bo_pick]
+      allow_runtime_promotion: false
+      allow_non_top_final_replacement: false
+      non_top_replacement_requires_evidence_gate: true
+      guardrail_mode: veto_only
+    atlas:
+      supports_problem_shaping: true
+      supports_shortlist_probe: true
+      default_selection_authority_level: planner_only
+      allowed_mainline_actions: [direct_bo_pick, shape_only_bo_pick]
+      allowed_rare_actions: [shape_then_probe_topk, shortlist_alt_pick, focused_shortlist_alt_pick]
+      allowed_prompt_styles: [default, shape_only, challenger_with_incumbent, shape_probe_topk]
+      allow_runtime_promotion: false
+      allow_non_top_final_replacement: true
+      non_top_replacement_requires_evidence_gate: true
+      guardrail_mode: veto_only
+    botorch_qei:
+      supports_problem_shaping: true
+      supports_shortlist_probe: false
+      default_selection_authority_level: planner_only
+      allowed_mainline_actions: [direct_bo_pick, shape_only_bo_pick, mask_low_repeat_resuggest, mask_dominant_resuggest, mask_scaffold_corridor_resuggest]
+      allowed_rare_actions: [shape_then_probe_topk, shortlist_alt_pick, focused_shortlist_alt_pick]
+      allowed_prompt_styles: [default, shape_only, resuggest_bo_pick]
+      allow_runtime_promotion: false
+      allow_non_top_final_replacement: false
+      non_top_replacement_requires_evidence_gate: true
+      guardrail_mode: veto_only
+    botorch_qlogei:
+      supports_problem_shaping: true
+      supports_shortlist_probe: false
+      default_selection_authority_level: planner_only
+      allowed_mainline_actions: [direct_bo_pick, shape_only_bo_pick, mask_low_repeat_resuggest, mask_dominant_resuggest, mask_scaffold_corridor_resuggest]
+      allowed_rare_actions: [shape_then_probe_topk, shortlist_alt_pick, focused_shortlist_alt_pick]
+      allowed_prompt_styles: [default, shape_only, resuggest_bo_pick]
+      allow_runtime_promotion: false
+      allow_non_top_final_replacement: false
+      non_top_replacement_requires_evidence_gate: true
+      guardrail_mode: veto_only
+  trusted_planner_names: [discrete, botorch_qei, botorch_qlogei]
+  trusted_planner_min_no_improvement_rounds: 6
+  trusted_planner_disable_early_diversity: true
+  trusted_planner_override_score_margin: 0.10
+  trusted_planner_min_transfer_score: 0.75
+  trusted_planner_min_hypothesis_score: 0.80
+  enable_trusted_planner_pre_rerank_skip: true
+  enable_late_stage_incumbent_protection: true
+  late_stage_start_iteration: 10
+  late_stage_start_fraction: 0.70
+  late_stage_strong_incumbent_percentile: 0.90
+  late_stage_override_score_margin: 0.12
+  late_stage_min_transfer_score: 0.80
+  late_stage_min_hypothesis_score: 0.85
+  allow_focus_then_rerank: true
+  candidate_direction_review_mode: off
+  candidate_direction_review_planners: [atlas]
+  candidate_direction_review_actions: [direct_bo_pick, shape_only_bo_pick]
+  candidate_direction_review_min_no_improvement_rounds: 0
+  candidate_direction_review_max_candidates: 5
+  candidate_direction_review_near_best_margin: 0.05
+  candidate_direction_review_require_finite_pool: true
+  candidate_probe_enabled: false
+  candidate_probe_planners: [atlas, botorch_qei]
+  candidate_probe_actions: [finite_pool_candidate_probe]
+  candidate_probe_max_candidates: 4
+  candidate_probe_top_history: 6
+  candidate_probe_merge_max_size: 8
+  candidate_probe_min_no_improvement_rounds: 3
+  candidate_probe_min_iteration: 0
+  candidate_probe_require_finite_pool: true
+  candidate_probe_selection_mode: merge_only
+  candidate_probe_candidate_tool: probe
+  candidate_probe_local_min_anchor_matches: 3
+  candidate_probe_max_trigger_count: 0
+  candidate_probe_repeat_min_iteration: 0
+  candidate_probe_repeat_min_no_improvement_rounds: -1
+  candidate_probe_cooldown_rounds: 0
+  candidate_probe_repeat_selection_mode: ""
+  candidate_probe_late_stage_min_gp_mean_margin: 1.0
+  candidate_probe_recurrence_bonus: 0.0
+  candidate_probe_additive_novelty_bonus: 0.0
+  knowledge_top_k: 5
+  enable_experience_promotion: false
+  protocol_mode: benchmark_clean
+  enable_reviewed_knowledge: true
+  reviewed_knowledge_top_k: 3
+  init_reviewed_knowledge_mode: advisory
+  diagnosis_reviewed_knowledge_mode: decision_active
+  semantic_reviewed_knowledge_mode: advisory
+  verification_mode: advisory
+  reviewed_knowledge_advisory_content_statuses: [seed_placeholder, pinned_curated, reviewed_curated, revised_curated]
+  reviewed_knowledge_decision_content_statuses: [pinned_curated, reviewed_curated, revised_curated]
+  reviewed_knowledge_target_nodes: [design_init_experiments, stagnation_diagnosis, hypothesis_action, semantic_assessment, reflection_action, verification_pass]
+  enable_reviewed_experience: true
+  reviewed_experience_top_k: 2
+  enable_episodic_review_queue: true
+  episodic_review_queue_path: null
+  enable_knowledge_hit_ledger: true
+  knowledge_hit_ledger_path: null
+  enable_audit_artifacts: true
+  audit_artifact_dir: null
+  filter_mode: exact_match
+  method_name: agent_bo
+  method_family: agentic
+  planner_name: atlas
+  uses_extra_training: false
+  uses_pseudodata: false
+  uses_external_knowledge: false
+  seed: null
+  init_strategy: random
+  enable_llm_search_constraint: false
+  constraint_update_freq: 5
+  min_constraint_pool_fraction: 0.05
+  constraint_max_duration_rounds: 8
+  terminal_verbosity: progress
+  suppress_third_party_output: true
+  third_party_log_path: null
+  progress_jsonl_path: null
+  status_json_path: null
+
+prompt:
+  history_tail_window: 6  # 送入 decision_context 的最近历史轮数。
+  history_reflection_max_chars: 160  # recent_history_tail 中 reflection 的截断长度。
+  knowledge_max_items: 5  # run_context 阶段最多保留多少条知识片段。
+  knowledge_max_chars: 240  # run_context 阶段单条知识片段最大长度。
+  decision_engine_knowledge_max_items: 5  # 进入最终 prompt 时最多保留多少条知识片段。
+  decision_engine_knowledge_max_chars: 400  # 进入最终 prompt 时单条知识片段最大长度。
+  skills:
+    enabled: true  # 是否启用按节点加载的 procedural skills。
+    trace_loaded_skills: true  # 是否把本轮加载到的 skill 记录进 artifact/trace。
+    cards_dir: null  # 为空时使用内置 procedural skill cards 目录。
+  init:
+    sample_pool_size: 12  # init prompt 中给 LLM 参考的合法样本数；太大会显著撑大 prompt。
+    annotation_max_entries: 24  # init prompt 中最多注入多少条注解卡片。
+  search_constraint:
+    annotation_max_entries: 80  # 搜索约束 prompt 的注解卡片上限。
+  reaction_overrides:
+    buchwald:
+      priority_columns: [Reactant2, Ligand, Base, Additive]  # Buchwald 中优先保留哪些列的注解。
+      per_column_caps:
+        Additive: 2  # Additive 往往很长，默认只保留少量，避免 prompt 过胖。
+    arylation:
+      priority_columns: [Aryl_halide_SMILES, Additive_SMILES, Ligand_SMILES, Base_SMILES]  # Arylation 中优先解释底物/添加物与配体。
+      per_column_caps:
+        Aryl_halide_SMILES: 4
+        Additive_SMILES: 4
+        Ligand_SMILES: 4
