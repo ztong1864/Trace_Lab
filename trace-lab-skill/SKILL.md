@@ -1,9 +1,9 @@
 ---
-name: trace-collab-skill
+name: trace-lab-skill
 description: Use when Codex needs to operate TRACE-COLLAB / TRACE Lab chemical experiment recommendation workflows from CSV inputs, generate candidate recommendations, save recommendation CSVs under trace-collab-skill/output, show recommendation tables, submit completed experiment results, continue next-round recommendations, or troubleshoot agentic/bo_only, .env, model/API key, project.yaml, design_space.csv, observations.csv, recommendations, and trace files.
 ---
 
-# TRACE-COLLAB Skill
+# TRACE Lab Skill
 
 本 skill 是 TRACE Lab 的操作技能，用于协助实验人员完成闭环候选推荐：
 
