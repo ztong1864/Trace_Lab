@@ -7,7 +7,12 @@ from typing import Any, Callable
 
 from atlas.planners.gp.planner import GPPlanner
 
-from chem_agent_bo.bo.base import BasePlanner
+from chem_agent_bo.bo.base import BasePlanner, normalize_acquisition_type
+
+
+# Atlas acquisition types that work in the one-candidate-per-call mode used below.
+# "pi" is excluded because Atlas's PI.evaluate() is unfinished and returns None.
+ATLAS_ACQUISITION_TYPES = ("ei", "ucb")
 
 
 class AtlasBOTool(BasePlanner):
@@ -20,26 +25,36 @@ class AtlasBOTool(BasePlanner):
         goal: str = "maximize",
         known_constraints: list[Callable[[Any], bool]] | None = None,
         use_descriptors: bool = False,
+        acquisition_type: str = "ei",
     ) -> None:
         self._num_init_design = num_init_design
         self._seed = seed
         self._goal = goal
         self._known_constraints = list(known_constraints or [])
         self._use_descriptors = bool(use_descriptors)
+        self._acquisition_type = normalize_acquisition_type(
+            acquisition_type,
+            supported=ATLAS_ACQUISITION_TYPES,
+            planner_name="atlas",
+        )
         self._constraint_signature = self._signature_for_constraints(self._known_constraints)
         self._planner_refresh_count = 0
         self._last_planner_refresh_reason = "init"
         self._last_planner_refreshed = True
         self.planner = self._build_planner()
 
-    def _build_planner(self, batch_size: int | None = None) -> GPPlanner:
+    def _build_planner(self) -> GPPlanner:
+        # Always batch_size=1: Atlas's batch mode (batch_size > 1) crashes on
+        # categorical/discrete spaces -- analytic EI has no set_pending_params,
+        # and "ucb" switches to qUCB, whose pending-point concatenation breaks
+        # tensor shapes. Batches are built by suggest_shortlist() instead.
         return GPPlanner(
             goal=self._goal,
             init_design_strategy="random",
-            acquisition_type="ei",
+            acquisition_type=self._acquisition_type,
             acquisition_optimizer_kind="gradient",
             num_init_design=self._num_init_design,
-            batch_size=batch_size or 1,
+            batch_size=1,
             random_seed=self._seed,
             known_constraints=self._known_constraints,
             use_descriptors=self._use_descriptors,
@@ -154,7 +169,7 @@ class AtlasBOTool(BasePlanner):
             shortlist_planner = GPPlanner(
                 goal=self._goal,
                 init_design_strategy="random",
-                acquisition_type="ei",
+                acquisition_type=self._acquisition_type,
                 acquisition_optimizer_kind="gradient",
                 num_init_design=self._num_init_design,
                 batch_size=1,
@@ -186,7 +201,7 @@ class AtlasBOTool(BasePlanner):
             "search_space_type": "mixed",
             "candidate_pool_mode": "planner_internal",
             "surrogate_name": "AtlasGPPlanner",
-            "acquisition_name": "ei",
+            "acquisition_name": self._acquisition_type,
             "encoding_name": "planner_internal",
             "constraint_signature": self._constraint_signature,
             "planner_refresh_count": self._planner_refresh_count,

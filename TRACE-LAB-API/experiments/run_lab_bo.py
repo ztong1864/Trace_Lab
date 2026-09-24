@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     ask_parser = subparsers.add_parser("ask", help="Generate the next lab recommendation batch.")
     ask_parser.add_argument("--project-dir", required=True)
     ask_parser.add_argument("--batch-size", type=int, default=None)
-    ask_parser.add_argument("--planner-name", choices=("atlas", "random"), default=None)
+    ask_parser.add_argument("--planner-name", choices=("atlas", "chunked_gp", "random"), default=None)
     ask_parser.add_argument("--controller-mode", choices=("agentic", "bo_only"), default=None)
     ask_parser.add_argument("--agent-config", default=None)
     ask_parser.add_argument(
@@ -78,7 +78,7 @@ def _add_project_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--objective-name", default="yield")
     parser.add_argument("--goal", choices=("maximize", "minimize"), default="maximize")
     parser.add_argument("--batch-size", type=int, default=6)
-    parser.add_argument("--planner-name", choices=("atlas", "random"), default="atlas")
+    parser.add_argument("--planner-name", choices=("atlas", "chunked_gp", "random"), default="atlas")
     parser.add_argument("--controller-mode", choices=("agentic", "bo_only"), default="agentic")
     parser.add_argument("--agent-config", default="configs/agent_bo.yaml")
     parser.add_argument("--planner-use-descriptors", action="store_true")

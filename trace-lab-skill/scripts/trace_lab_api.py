@@ -316,6 +316,17 @@ def format_recommendations(data: dict[str, Any]) -> str:
         f"Controller: {data.get('controller_mode', project.get('controller_mode', ''))}",
         "",
     ]
+    planner_error = next(
+        (item.get("planner_error") for item in recommendations if item.get("planner_error")),
+        "",
+    )
+    if planner_error:
+        lines[-1:-1] = [
+            f"WARNING: planner fallback -- the optimizer failed ({single_line(planner_error)}), "
+            "so these are random candidates, not Bayesian-optimization recommendations.",
+        ]
+    planner_notes = recommendations[0].get("planner_warnings") or []
+    lines[-1:-1] = [f"NOTE: {single_line(note)}" for note in planner_notes]
     rows = []
     for item in recommendations:
         candidate = item.get("candidate") or {}

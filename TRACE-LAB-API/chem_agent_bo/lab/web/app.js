@@ -453,7 +453,21 @@ function renderBatchSummary(batch) {
   const staleWarning = batchUsesStaleControlledConditions(batch)
     ? `<div class="warning"><strong>Schema note</strong>: this batch uses controlled-condition values that differ from the current project controls. Reset and regenerate if it was created before the current design-space schema.</div>`
     : "";
-  if (!strategy && !rationale && !constraints.length && !evidenceSummary && !staleWarning) {
+  const fallbackWarning = first.planner_error
+    ? `<div class="warning"><strong>Planner fallback</strong>: the optimizer failed (${escapeHtml(first.planner_error)}), so this batch contains random candidates, not Bayesian-optimization recommendations.</div>`
+    : "";
+  const plannerNotes = (first.planner_warnings || [])
+    .map((note) => `<div class="warning"><strong>Planner note</strong>: ${escapeHtml(note)}</div>`)
+    .join("");
+  if (
+    !strategy &&
+    !rationale &&
+    !constraints.length &&
+    !evidenceSummary &&
+    !staleWarning &&
+    !fallbackWarning &&
+    !plannerNotes
+  ) {
     node.classList.add("empty");
     node.textContent = "Generate a batch to see the batch strategy.";
     return;
@@ -466,6 +480,8 @@ function renderBatchSummary(batch) {
     <div><strong>Strategy</strong>: ${escapeHtml(strategy || "batch composition")}</div>
     ${rationale ? `<div><strong>Rationale</strong>: ${escapeHtml(rationale)}</div>` : ""}
     ${constraintText}
+    ${fallbackWarning}
+    ${plannerNotes}
     ${evidenceSummary}
     ${staleWarning}
   `;

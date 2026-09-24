@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from chem_agent_bo.lab.design_space import DesignSpace
+from chem_agent_bo.lab.design_space import DesignSpace, _parse_bool
 
 
 @dataclass
@@ -22,6 +22,12 @@ class ProjectConfig:
     goal: str = "maximize"
     batch_size: int = 6
     planner_name: str = "atlas"
+    # Honored by the "atlas" and "chunked_gp" planners, which each validate it
+    # against their own supported set when a batch is requested.
+    acquisition_function: str = "ei"
+    # When the planner fails, either fall back to random candidates (flagged with
+    # a warning) or, if False, fail the ask without writing a batch.
+    allow_random_fallback: bool = True
     seed: int = 7
     reaction_scope: str = ""
     evidence_file: str = "evidence_cards.jsonl"
@@ -42,6 +48,8 @@ class ProjectConfig:
             goal="minimize" if str(self.goal).lower().startswith("min") else "maximize",
             batch_size=max(1, int(self.batch_size or 1)),
             planner_name=str(self.planner_name or "atlas").strip().lower(),
+            acquisition_function=str(self.acquisition_function or "ei").strip().lower(),
+            allow_random_fallback=_parse_bool(self.allow_random_fallback, default=True),
             seed=int(self.seed or 7),
             reaction_scope=str(self.reaction_scope or ""),
             evidence_file=str(self.evidence_file or "evidence_cards.jsonl"),
@@ -51,7 +59,7 @@ class ProjectConfig:
                 else "agentic"
             ),
             agent_config_path=str(self.agent_config_path or "configs/agent_bo.yaml"),
-            planner_use_descriptors=bool(self.planner_use_descriptors),
+            planner_use_descriptors=_parse_bool(self.planner_use_descriptors, default=False),
             created_at=created,
             updated_at=now,
             metadata=dict(self.metadata or {}),
@@ -285,12 +293,15 @@ class LabProject:
         batches: list[RecommendationBatch] = []
         for path in sorted(self.project_dir.glob("recommendations_round_*.json")):
             payload = json.loads(path.read_text(encoding="utf-8"))
+            recommendations = list(payload.get("recommendations") or [])
+            trace_records = list(payload.get("trace_records") or [])
+            _backfill_planner_errors(recommendations, trace_records)
             batches.append(
                 RecommendationBatch(
                     round_id=str(payload["round_id"]),
                     created_at=str(payload.get("created_at") or ""),
-                    recommendations=list(payload.get("recommendations") or []),
-                    trace_records=list(payload.get("trace_records") or []),
+                    recommendations=recommendations,
+                    trace_records=trace_records,
                 )
             )
         return batches
@@ -353,6 +364,25 @@ def _write_recommendation_csv(
             for name in variable_names:
                 row[name] = candidate.get(name, row.get(name, ""))
             writer.writerow(row)
+
+
+def _backfill_planner_errors(
+    recommendations: list[dict[str, Any]],
+    trace_records: list[dict[str, Any]],
+) -> None:
+    """Copy `planner_error` from trace records onto recommendations that predate the field.
+
+    Batches written before recommendations carried `planner_error` only recorded it in
+    their traces, so a random-fallback batch would otherwise look like a normal one.
+    """
+    errors = {
+        str(record.get("recommendation_id")): str(record.get("planner_error") or "")
+        for record in trace_records
+        if record.get("recommendation_id")
+    }
+    for recommendation in recommendations:
+        if "planner_error" not in recommendation:
+            recommendation["planner_error"] = errors.get(str(recommendation.get("recommendation_id")), "")
 
 
 def _safe_project_id(value: str) -> str:

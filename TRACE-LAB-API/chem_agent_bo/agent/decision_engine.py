@@ -295,6 +295,9 @@ class DecisionEngine:
         output_cost_per_1m: float | None = None,
         cached_input_cost_per_1m: float | None = None,
         prompt_config: PromptConfig | None = None,
+        use_responses_api: bool = False,
+        reasoning_effort: str | None = None,
+        disable_response_storage: bool = False,
     ) -> None:
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
         resolved_base = (
@@ -311,6 +314,13 @@ class DecisionEngine:
             "timeout": timeout_sec,
             "max_retries": request_max_retries,
         }
+        if use_responses_api:
+            model_kwargs["use_responses_api"] = True
+        if reasoning_effort:
+            model_kwargs["reasoning_effort"] = str(reasoning_effort)
+        if disable_response_storage:
+            # Ask the provider not to retain requests/responses (Responses API `store`).
+            model_kwargs["store"] = False
         self._structured_retry_attempts = max(1, int(structured_retry_attempts))
         self._retry_backoff_sec = max(0.0, float(retry_backoff_sec))
         self._retry_max_backoff_sec = max(self._retry_backoff_sec, float(retry_max_backoff_sec))

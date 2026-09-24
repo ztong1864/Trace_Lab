@@ -6,11 +6,20 @@ from typing import Any
 
 from chem_agent_bo.bo.base import BasePlanner
 from chem_agent_bo.bo.botorch_bo import BoTorchFinitePoolPlanner
+from chem_agent_bo.bo.chunked_gp import ChunkedGPPlanner
 from chem_agent_bo.bo.discrete_bo import DiscreteBOPlanner
 from chem_agent_bo.bo.random_bo import RandomPlanner
 
 
-PLANNER_NAMES = ("atlas", "random", "discrete", "botorch", "botorch_qei", "botorch_qlogei")
+PLANNER_NAMES = (
+    "atlas",
+    "chunked_gp",
+    "random",
+    "discrete",
+    "botorch",
+    "botorch_qei",
+    "botorch_qlogei",
+)
 
 
 def planner_choices() -> tuple[str, ...]:
@@ -25,6 +34,7 @@ def build_planner(
     seed: int,
     known_constraints: list[Any] | None = None,
     use_descriptors: bool = False,
+    acquisition_type: str = "ei",
 ) -> BasePlanner:
     name = str(planner_name).strip().lower()
     if name == "random":
@@ -38,6 +48,15 @@ def build_planner(
             goal=env.goal,
             known_constraints=known_constraints,
             use_descriptors=use_descriptors,
+            acquisition_type=acquisition_type,
+        )
+    if name == "chunked_gp":
+        return ChunkedGPPlanner(
+            seed=seed,
+            goal=env.goal,
+            known_constraints=known_constraints,
+            use_descriptors=use_descriptors,
+            acquisition_type=acquisition_type,
         )
     if name == "discrete":
         if not getattr(env, "is_finite_pool", False):

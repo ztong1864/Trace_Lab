@@ -13,6 +13,7 @@ from typing import Any
 from olympus.campaigns import Campaign, ParameterSpace
 from olympus.objects import ParameterContinuous, ParameterVector
 
+from chem_agent_bo.bo.base import ExclusionConstraint
 from chem_agent_bo.bo.registry import build_planner
 from chem_agent_bo.config import load_agentic_bo_config
 from chem_agent_bo.config.schema import AgenticBOConfig
@@ -30,7 +31,9 @@ from chem_agent_bo.utils.run_io import capture_third_party_output
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-LAB_SUPPORTED_PLANNERS = {"atlas", "random"}
+LAB_SUPPORTED_PLANNERS = {"atlas", "chunked_gp", "random"}
+# Planners that can use per-option numeric descriptors as GP inputs.
+LAB_DESCRIPTOR_PLANNERS = {"atlas", "chunked_gp"}
 LAB_EVIDENCE_TARGET_NODES = (
     "design_init_experiments",
     "stagnation_diagnosis",
@@ -170,7 +173,7 @@ class LabBOService:
         )
         effective_planner_descriptors = (
             requested_planner_descriptors
-            and effective_planner_name == "atlas"
+            and effective_planner_name in LAB_DESCRIPTOR_PLANNERS
             and bool(descriptor_eligibility.get("eligible"))
         )
 
@@ -216,6 +219,7 @@ class LabBOService:
             effective_batch_size = min(effective_batch_size, remaining)
 
         planner_error = ""
+        requested_planner_name = effective_planner_name
         third_party_log_path = project.project_dir / "logs" / "third_party.log"
         with capture_third_party_output(
             enabled=True,
@@ -229,6 +233,7 @@ class LabBOService:
                 seed=config.seed,
                 known_constraints=constraints,
                 use_descriptors=effective_planner_descriptors,
+                acquisition_type=config.acquisition_function,
             )
         try:
             with capture_third_party_output(
@@ -247,6 +252,12 @@ class LabBOService:
             if effective_planner_name == "random":
                 raise
             planner_error = f"{type(exc).__name__}: {exc}"
+            if not config.allow_random_fallback:
+                raise RuntimeError(
+                    f"The {effective_planner_name} planner failed ({planner_error}); "
+                    "no recommendations were written. Set `allow_random_fallback: true` "
+                    "in project.yaml to accept random candidates instead."
+                ) from exc
             with capture_third_party_output(
                 enabled=True,
                 log_path=third_party_log_path,
@@ -384,6 +395,11 @@ class LabBOService:
             "controller_mode": effective_controller_mode,
             "planner_use_descriptors": effective_planner_descriptors,
             "planner_descriptor_eligibility": descriptor_eligibility,
+            "planner_fallback": _planner_fallback_summary(
+                requested_planner_name=requested_planner_name,
+                planner_error=planner_error,
+            ),
+            "planner_warnings": _planner_warnings(planner.planner_diagnostics()),
         }
 
     def import_observations(
@@ -536,7 +552,10 @@ class LabBOService:
                     f"Recommendation `{recommendation_id}` is already marked "
                     f"{recommendation_status}."
                 )
-            objective_value = _clean(raw.get(config.objective_name) or raw.get("result"))
+            # Chain with `or` on the *cleaned strings*, not the raw values -- a genuine
+            # 0/0.0 result is falsy in Python and would otherwise be treated as "missing",
+            # incorrectly falling through to the next key (or to `float()` on an empty string).
+            objective_value = _clean(raw.get(config.objective_name)) or _clean(raw.get("result"))
             if status == "completed":
                 try:
                     objective_value = str(float(objective_value))
@@ -781,10 +800,13 @@ def _normalize_imported_observation(
     default_source: str,
     next_observation_index: int,
 ) -> dict[str, Any]:
-    objective_value = _clean(
-        _row_value(raw, config.objective_name)
-        or _row_value(raw, "result")
-        or _row_value(raw, "objective")
+    # Clean each candidate to a string before `or`-chaining -- a genuine 0/0.0 result is
+    # falsy in Python, so chaining on the raw values would treat it as "missing" and fall
+    # through to the next key (or ultimately fail the float() conversion below).
+    objective_value = (
+        _clean(_row_value(raw, config.objective_name))
+        or _clean(_row_value(raw, "result"))
+        or _clean(_row_value(raw, "objective"))
     )
     status = _clean(_row_value(raw, "status")).lower()
     if not status:
@@ -1045,6 +1067,9 @@ def _build_decision_engine(config: AgenticBOConfig):
         output_cost_per_1m=runtime_cfg.llm_output_cost_per_1m,
         cached_input_cost_per_1m=runtime_cfg.llm_cached_input_cost_per_1m,
         prompt_config=config.prompt,
+        use_responses_api=runtime_cfg.use_responses_api,
+        reasoning_effort=runtime_cfg.reasoning_effort,
+        disable_response_storage=runtime_cfg.disable_response_storage,
     )
 
 
@@ -1139,6 +1164,24 @@ def _lab_search_space_meta(
         "candidate_count": None,
         "oracle_evaluation_disabled": True,
     }
+
+
+def _planner_fallback_summary(*, requested_planner_name: str, planner_error: str) -> dict[str, Any]:
+    if not planner_error:
+        return {"used": False}
+    return {
+        "used": True,
+        "requested_planner": requested_planner_name,
+        "error": planner_error,
+        "warning": (
+            f"The {requested_planner_name} planner failed, so this batch contains random "
+            "candidates, not Bayesian-optimization recommendations."
+        ),
+    }
+
+
+def _planner_warnings(planner_diagnostics: dict[str, Any] | None) -> list[str]:
+    return [str(item) for item in (planner_diagnostics or {}).get("warnings") or []]
 
 
 def _estimated_design_space_size(design_space: DesignSpace) -> int | None:
@@ -1320,6 +1363,8 @@ def _recommendations_from_decision(
             "candidate": candidate,
             "rationale": rationale,
             "planner_name": planner_name,
+            "planner_error": planner_error,
+            "planner_warnings": _planner_warnings(planner_diagnostics),
             "batch_role": trace_record.get("batch_role", ""),
             "batch_role_reason": trace_record.get("batch_role_reason", ""),
             "batch_slot": trace_record.get("batch_slot", {}),
@@ -1432,6 +1477,8 @@ def _bo_only_recommendations(
             "candidate": candidate,
             "rationale": rationale,
             "planner_name": planner_name,
+            "planner_error": planner_error,
+            "planner_warnings": _planner_warnings(planner_diagnostics),
             "controller_action": "keep_planner_batch",
             "descriptor_profile": descriptor_profile,
             "descriptor_contrast_to_anchor": descriptor_contrast,
@@ -1758,7 +1805,12 @@ def _exclude_candidate_keys(
             return False
         return key not in banned
 
-    return _constraint
+    return ExclusionConstraint(
+        variable_names=variable_names,
+        excluded_keys=banned,
+        normalize_value=_normalize_condition_value,
+        check=_constraint,
+    )
 
 
 def _build_lab_rationale(

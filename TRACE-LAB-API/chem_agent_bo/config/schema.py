@@ -130,6 +130,9 @@ class RuntimeConfig:
     env_profile: str = "atlas"
     model_name: str = "gpt-5.4"
     api_base: str | None = None
+    use_responses_api: bool = False
+    reasoning_effort: str | None = None
+    disable_response_storage: bool = False
     temperature: float = 0.0
     llm_timeout_sec: float = 45.0
     llm_request_max_retries: int = 2
