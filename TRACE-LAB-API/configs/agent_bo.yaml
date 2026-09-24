@@ -6,16 +6,15 @@
 
 runtime:
   env_profile: atlas  # 运行环境：atlas / chembo。当前 agent 主路径默认 atlas。
-  model_name: gpt-5.4-mini  # 默认使用的 LLM 模型。
+  model_name: gpt-6-luna  # 默认使用的 LLM 模型。
   api_base: null  # 为空时走环境变量 OPENAI_BASE_URL / OPENAI_BASE_URL。
-  temperature: 0.0  # 默认保持 0，保证实验可复现性更强。
   llm_timeout_sec: 60.0  # 单次 LLM 请求超时（秒）；实验期适度放宽，减少早期网关抖动。
   llm_request_max_retries: 5  # 底层请求失败时的重试次数。
   llm_structured_retry_attempts: 5  # 结构化输出失败时的应用层重试次数。
   llm_retry_backoff_sec: 2.5  # 结构化重试的退避时间基数。
   llm_retry_max_backoff_sec: 20.0  # 结构化重试的最大退避时间。
   llm_retry_jitter_sec: 0.75  # 结构化重试的随机抖动，降低一开始集中失败。
-  llm_fallback_model_name: gpt-5.4-mini  # 仅在连接/网关类错误连续失败后启用的备用模型。
+  llm_fallback_model_name: gpt-6-luna  # 仅在连接/网关类错误连续失败后启用的备用模型。
   llm_fallback_attempts: 2  # 备用模型的额外尝试次数。
   llm_fail_on_nonretryable_error: true  # 对鉴权/配额/参数错误等非连接类问题直接失败，避免静默退化成非 LLM 路径。
   llm_pricing_profile: auto  # 成本估算 profile。

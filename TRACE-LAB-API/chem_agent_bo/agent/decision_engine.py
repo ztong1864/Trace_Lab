@@ -278,8 +278,8 @@ class DecisionEngine:
 
     def __init__(
         self,
-        model_name: str = "gpt-5.4-mini",
-        temperature: float = 0.0,
+        model_name: str = "gpt-6-luna",
+        temperature: float | None = None,
         api_base: str | None = None,
         timeout_sec: float = 45.0,
         request_max_retries: int = 2,
@@ -310,10 +310,12 @@ class DecisionEngine:
 
         model_kwargs: dict[str, Any] = {
             "model": model_name,
-            "temperature": temperature,
             "timeout": timeout_sec,
             "max_retries": request_max_retries,
         }
+        if temperature is not None:
+            # Only sent when configured: reasoning models (e.g. gpt-6-luna) reject it.
+            model_kwargs["temperature"] = float(temperature)
         if use_responses_api:
             model_kwargs["use_responses_api"] = True
         if reasoning_effort:

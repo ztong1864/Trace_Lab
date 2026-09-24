@@ -198,6 +198,21 @@ class PlannerReliabilityTests(unittest.TestCase):
             recommendation = project.load_batches()[0].recommendations[0]
             self.assertEqual(recommendation["planner_error"], "TypeError: boom")
 
+    def test_agent_config_path_resolves_against_project_folder_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            (project_dir / "agent_bo.yaml").write_text("runtime: {}\n", encoding="utf-8")
+            self.assertEqual(
+                lab_service._resolve_agent_config_path("agent_bo.yaml", project_dir=project_dir),
+                project_dir / "agent_bo.yaml",
+            )
+            self.assertEqual(
+                lab_service._resolve_agent_config_path("configs/agent_bo.yaml", project_dir=project_dir),
+                PROJECT_ROOT / "configs/agent_bo.yaml",
+            )
+            with self.assertRaisesRegex(FileNotFoundError, "missing.yaml"):
+                lab_service._resolve_agent_config_path("missing.yaml", project_dir=project_dir)
+
     def test_decision_engine_receives_llm_runtime_settings(self):
         try:
             from chem_agent_bo.agent.decision_engine import DecisionEngine
@@ -220,6 +235,19 @@ class PlannerReliabilityTests(unittest.TestCase):
         self.assertTrue(captured["use_responses_api"])
         self.assertEqual(captured["reasoning_effort"], "xhigh")
         self.assertIs(captured["store"], False)
+        self.assertNotIn("temperature", captured)  # unset by default: gpt-6-luna rejects it
+
+        captured.clear()
+        config.runtime.temperature = 0.2
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), mock.patch.object(
+            DecisionEngine, "_build_agent_bundle", side_effect=capture
+        ):
+            lab_service._build_decision_engine(config)
+        self.assertEqual(captured["temperature"], 0.2)
+
+    def test_repo_agent_config_sends_no_temperature(self):
+        config = lab_service._load_agentic_config("configs/agent_bo.yaml", project_dir=PROJECT_ROOT)
+        self.assertIsNone(config.runtime.temperature)
 
     def test_atlas_tool_never_uses_atlas_batch_mode(self):
         tool = AtlasBOTool(acquisition_type="ucb")
@@ -354,7 +382,7 @@ class ChunkedGPPlannerTests(unittest.TestCase):
         posterior = _LatentPosterior(planner._fit(space, train_idx, train_y), torch.double)
         legal = np.setdiff1d(np.arange(space["size"]), train_idx)
         mean, var = posterior.mean_var(planner._features(planner._decode(legal, space), space["blocks"]))
-        brute_force_best = int(legal[int(torch.argmax(planner._acquisition(mean, var, posterior.best_f)))])
+        brute_force_best = int(legal[int(torch.argmax(planner._acquisition(mean, var, posterior.best_f, "ei")))])
         keys, _ = self._shortlist(1, chunk_size=4, finalist_count=2)
         self.assertEqual(keys[0], tuple(planner._candidate(brute_force_best, space).values()))
 
@@ -407,6 +435,43 @@ class ChunkedGPPlannerTests(unittest.TestCase):
         )
         keys, _ = self._shortlist(3, chunk_size=5, known_constraints=[constraint])
         self.assertNotIn(top[0], keys)
+
+    def test_ei_ucb_merges_both_batches_and_ranks_by_predicted_mean(self):
+        size = 4
+        ei_keys, _ = self._shortlist(size, acquisition_type="ei")
+        ucb_keys, _ = self._shortlist(size, acquisition_type="ucb")
+        keys, planner = self._shortlist(size, acquisition_type="ei_ucb")
+        diagnostics = planner.planner_diagnostics()
+        self.assertEqual(diagnostics["acquisition_name"], "ei_ucb")
+        self.assertEqual(diagnostics["selection_mode"], "gp_ei_ucb_merge_rank_by_mean")
+
+        union = list(dict.fromkeys(ei_keys + ucb_keys))
+        space = planner._encode_space(self.param_space)
+        train_idx, train_y, _ = planner._training_data(self.campaign.observations, space)
+        posterior = _LatentPosterior(planner._fit(space, train_idx, train_y), torch.double)
+        index_of = {
+            key: planner._index_of([space["lookup"][v][value] for v, value in enumerate(key)], space)
+            for key in union
+        }
+        indices = np.asarray([index_of[key] for key in union], dtype=np.int64)
+        means = posterior.mean_cov(planner._features(planner._decode(indices, space), space["blocks"]))[0]
+        mean_of = dict(zip(union, means.tolist()))
+        expected = sorted(union, key=lambda key: -mean_of[key])[:size]
+        self.assertEqual(keys, expected)
+
+        expected_tags = [
+            "+".join(kind for kind, picks in (("ei", ei_keys), ("ucb", ucb_keys)) if key in picks)
+            for key in keys
+        ]
+        self.assertEqual(diagnostics["pick_acquisitions"], expected_tags)
+
+    def test_single_acquisition_picks_are_tagged(self):
+        _, planner = self._shortlist(3, acquisition_type="ucb")
+        self.assertEqual(planner.planner_diagnostics()["pick_acquisitions"], ["ucb"] * 3)
+
+    def test_atlas_rejects_ei_ucb(self):
+        with self.assertRaisesRegex(ValueError, "atlas planner does not support acquisition function `ei_ucb`"):
+            AtlasBOTool(acquisition_type="ei_ucb")
 
     def test_exclusion_keys_are_matched_by_variable_name(self):
         top, _ = self._shortlist(1)
@@ -507,6 +572,20 @@ class ChunkedGPPlannerTests(unittest.TestCase):
                 self.assertFalse(first_keys & second_keys, "pending recommendations must be excluded")
                 trace = project.trace_path(first["round_id"]).read_text(encoding="utf-8")
                 self.assertIn('"acquisition_name": "%s"' % acquisition, trace)
+                self.assertEqual({item["proposed_by"] for item in first["recommendations"]}, {acquisition})
+
+    def test_service_ask_with_ei_ucb_tags_each_recommendation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            _create_small_project(
+                service, "mixed", planner_name="chunked_gp", acquisition_function="ei_ucb", batch_size=4
+            )
+            batch = service.ask("mixed")
+            self.assertEqual(batch["planner_fallback"], {"used": False})
+            tags = [item["proposed_by"] for item in batch["recommendations"]]
+            self.assertEqual(len(tags), 4)
+            self.assertTrue(set(tags) <= {"ei", "ucb", "ei+ucb"})
+            self.assertTrue(all(tags))
 
 
 if __name__ == "__main__":

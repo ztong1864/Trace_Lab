@@ -378,6 +378,7 @@ function exportRecommendationsCsv() {
     "status",
     ...candidateKeys,
     "batch_role",
+    "proposed_by",
     "controller_action",
     "rationale",
     "evidence_refs",
@@ -423,7 +424,11 @@ function renderRecommendations(batch) {
       statusCellHtml(item),
       candidateHtml(candidate),
       escapeHtml(item.controller_action || ""),
-      escapeHtml(item.batch_role || ""),
+      escapeHtml(
+        [item.batch_role, item.proposed_by && `proposed by ${String(item.proposed_by).toUpperCase()}`]
+          .filter(Boolean)
+          .join(" · ")
+      ),
       descriptorHtml(item.descriptor_contrast_to_anchor || {}, item.descriptor_signal || {}),
       evidenceHtml(item),
       rationaleHtml(item.rationale || ""),

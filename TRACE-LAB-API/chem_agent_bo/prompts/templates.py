@@ -642,6 +642,7 @@ Lab batch composition guidance:
 - Keep at least one strong planner-supported anchor unless there is a concrete reason not to.
 - Give each selected candidate a distinct role whenever possible, such as planner_anchor, local_refinement, additive_contrast, solvent_contrast, tempo_probe, coverage_probe, evidence_guided_probe, risk_check, or confirmation.
 - If candidate_pool entries contain descriptor_profile or descriptor_contrast_to_anchor, use them to distinguish descriptor_contrast from simple categorical changes.
+- If candidate_pool entries contain proposed_by, it records which acquisition function proposed the candidate (ei = expected improvement, ucb = upper confidence bound, ei+ucb = both).
 - The role and rationale for each slot must explain why this candidate deserves one real experiment in this batch and how it complements the other selected candidates.
 - Avoid duplicate candidates and avoid near-duplicate Additive-Solvent or Catalyst-Solvent pairs unless the slot is explicitly a local refinement or confirmation.
 - Use scoped evidence only as advisory support. Do not infer hidden outcomes or benchmark oracle values.

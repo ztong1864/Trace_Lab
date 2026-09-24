@@ -16,6 +16,10 @@ combinations. This planner instead:
    covariance (fixed hyperparameters), requiring picks to differ from each other
    in at least `min_changed_variables` variables while the pool allows it.
 
+`acquisition_function: ei_ucb` builds an EI batch and a UCB batch from the same
+scan, merges and dedupes them, ranks the merged set by the GP's predicted mean
+and keeps the top N; each pick records which acquisition(s) proposed it.
+
 With fewer than two distinct completed results there is nothing to fit, so the
 batch is a seeded random initial design (reported as a planner warning, not a
 failure). In full-scan mode the first pick is the global acquisition maximum,
@@ -39,7 +43,8 @@ from olympus.objects import ParameterVector
 from chem_agent_bo.bo.base import BasePlanner, ExclusionConstraint, normalize_acquisition_type
 
 
-CHUNKED_GP_ACQUISITION_TYPES = ("ei", "ucb")
+# "ei_ucb": build an EI batch and a UCB batch, merge, dedupe, rank by predicted mean.
+CHUNKED_GP_ACQUISITION_TYPES = ("ei", "ucb", "ei_ucb")
 
 
 class ChunkedGPPlanner(BasePlanner):
@@ -68,6 +73,9 @@ class ChunkedGPPlanner(BasePlanner):
             acquisition_type,
             supported=CHUNKED_GP_ACQUISITION_TYPES,
             planner_name="chunked_gp",
+        )
+        self._score_kinds = (
+            ["ei", "ucb"] if self._acquisition_type == "ei_ucb" else [self._acquisition_type]
         )
         self._chunk_size = max(1, int(chunk_size))
         self._finalist_count = max(1, int(finalist_count))
@@ -142,11 +150,12 @@ class ChunkedGPPlanner(BasePlanner):
                 "cannot be fitted; this batch is a seeded random initial design."
             )
             stats["selection_mode"] = "random_initial_design"
+            stats["pick_acquisitions"] = ["random"] * len(chosen)
         else:
             fit_started = time.perf_counter()
             posterior = _LatentPosterior(self._fit(space, train_idx, train_y), self._score_dtype)
             stats["fit_seconds"] = round(time.perf_counter() - fit_started, 3)
-            pool, scanned, scan_mode = self._scan(
+            pools, scanned, scan_mode = self._scan(
                 space, posterior, excluded, max(size, self._finalist_count)
             )
             if scan_mode == "subsample":
@@ -155,15 +164,34 @@ class ChunkedGPPlanner(BasePlanner):
                     f"{self._max_scan_size:,} scan limit; scored a seeded random subsample "
                     "instead, so the best combination may have been missed."
                 )
-            chosen, post_filtered, relaxed = self._select_batch(
-                space, posterior, pool, size, post_filters
-            )
+            batches: dict[str, list[int]] = {}
+            post_filtered = 0
+            relaxed = False
+            for kind in self._score_kinds:
+                picks, filtered, kind_relaxed = self._select_batch(
+                    space, posterior, pools[kind], size, post_filters, kind
+                )
+                batches[kind] = picks
+                post_filtered += filtered
+                relaxed = relaxed or kind_relaxed
+            if len(self._score_kinds) == 1:
+                chosen = batches[self._acquisition_type]
+                pick_acquisitions = [self._acquisition_type] * len(chosen)
+                selection_mode = "gp_" + self._acquisition_type
+            else:
+                chosen, pick_acquisitions = self._merge_rank_by_mean(space, posterior, batches, size)
+                selection_mode = "gp_ei_ucb_merge_rank_by_mean"
+                stats.update(
+                    batch_sizes={kind: len(picks) for kind, picks in batches.items()},
+                    overlap_count=len(set(batches["ei"]) & set(batches["ucb"])),
+                )
             stats.update(
-                selection_mode="gp_" + self._acquisition_type,
+                selection_mode=selection_mode,
+                pick_acquisitions=pick_acquisitions,
                 scan_mode=scan_mode,
                 scanned_count=int(scanned),
                 chunk_size=self._chunk_size,
-                pool_count=int(pool.size),
+                pool_count=int(np.unique(np.concatenate(list(pools.values()))).size),
                 post_filtered_count=int(post_filtered),
                 min_changed_variables=self._min_changed_variables,
                 diversity_relaxed=bool(relaxed),
@@ -362,9 +390,11 @@ class ChunkedGPPlanner(BasePlanner):
         model.eval()
         return model
 
-    def _acquisition(self, mean: torch.Tensor, var: torch.Tensor, best_f: torch.Tensor) -> torch.Tensor:
+    def _acquisition(
+        self, mean: torch.Tensor, var: torch.Tensor, best_f: torch.Tensor, kind: str
+    ) -> torch.Tensor:
         sigma = var.clamp_min(1e-12).sqrt()
-        if self._acquisition_type == "ucb":
+        if kind == "ucb":
             return mean + (self._ucb_beta ** 0.5) * sigma
         u = (mean - best_f) / sigma
         normal = torch.distributions.Normal(torch.zeros_like(u), torch.ones_like(u))
@@ -407,13 +437,21 @@ class ChunkedGPPlanner(BasePlanner):
         posterior: "_LatentPosterior",
         excluded: np.ndarray,
         keep: int,
-    ) -> tuple[np.ndarray, int, str]:
-        """Return the candidate pool: global top-`keep` plus the best per (variable, option)."""
+    ) -> tuple[dict[str, np.ndarray], int, str]:
+        """Return one candidate pool per acquisition kind, from a single pass.
+
+        Each pool is that acquisition's global top-`keep` plus its best candidate per
+        (variable, option). EI and UCB share the posterior mean and variance, so
+        scoring both costs one scan.
+        """
         blocks = [block.to(self._score_dtype) for block in space["blocks"]]
-        top_scores = np.empty(0, dtype=np.float64)
-        top_idx = np.empty(0, dtype=np.int64)
-        option_best = [np.full(radix, -np.inf) for radix in space["radices"]]
-        option_idx = [np.full(radix, -1, dtype=np.int64) for radix in space["radices"]]
+        kinds = self._score_kinds
+        top_scores = {kind: np.empty(0, dtype=np.float64) for kind in kinds}
+        top_idx = {kind: np.empty(0, dtype=np.int64) for kind in kinds}
+        option_best = {kind: [np.full(radix, -np.inf) for radix in space["radices"]] for kind in kinds}
+        option_idx = {
+            kind: [np.full(radix, -1, dtype=np.int64) for radix in space["radices"]] for kind in kinds
+        }
         chunks, mode = self._index_chunks(space, excluded)
         scanned = 0
         for indices in chunks:
@@ -422,30 +460,36 @@ class ChunkedGPPlanner(BasePlanner):
             digits = self._decode(indices, space)
             with torch.no_grad():
                 mean, var = posterior.mean_var(self._features(digits, blocks))
-                scores = self._acquisition(mean, var, posterior.best_f_score).double().numpy()
             scanned += indices.size
+            for kind in kinds:
+                with torch.no_grad():
+                    scores = self._acquisition(mean, var, posterior.best_f_score, kind).double().numpy()
+                top_scores[kind], top_idx[kind] = _merge_top_k(
+                    top_scores[kind],
+                    top_idx[kind],
+                    scores,
+                    indices,
+                    keep=keep,
+                    dedupe=mode == "subsample",  # the same index can be drawn in several chunks
+                )
 
-            top_scores, top_idx = _merge_top_k(
-                top_scores,
-                top_idx,
-                scores,
-                indices,
-                keep=keep,
-                dedupe=mode == "subsample",  # the same index can be drawn in several chunks
+                # Best candidate per (variable, option), so regions away from the global
+                # optimum stay available to the diversity-aware batch selection.
+                order = np.argsort(-scores, kind="stable")
+                for v in range(len(space["names"])):
+                    opts, first = np.unique(digits[order, v], return_index=True)
+                    positions = order[first]
+                    better = scores[positions] > option_best[kind][v][opts]
+                    option_best[kind][v][opts[better]] = scores[positions][better]
+                    option_idx[kind][v][opts[better]] = indices[positions][better]
+
+        pools = {
+            kind: np.unique(
+                np.concatenate([top_idx[kind], *[idx[idx >= 0] for idx in option_idx[kind]]])
             )
-
-            # Best candidate per (variable, option), so regions away from the global
-            # optimum stay available to the diversity-aware batch selection.
-            order = np.argsort(-scores, kind="stable")
-            for v in range(len(space["names"])):
-                opts, first = np.unique(digits[order, v], return_index=True)
-                positions = order[first]
-                better = scores[positions] > option_best[v][opts]
-                option_best[v][opts[better]] = scores[positions][better]
-                option_idx[v][opts[better]] = indices[positions][better]
-
-        pool = np.concatenate([top_idx, *[idx[idx >= 0] for idx in option_idx]])
-        return np.unique(pool), scanned, mode
+            for kind in kinds
+        }
+        return pools, scanned, mode
 
     def _select_batch(
         self,
@@ -454,6 +498,7 @@ class ChunkedGPPlanner(BasePlanner):
         pool: np.ndarray,
         size: int,
         post_filters: list[Callable[[Any], bool]],
+        kind: str,
     ) -> tuple[list[int], int, bool]:
         if pool.size == 0:
             return [], 0, False
@@ -466,7 +511,7 @@ class ChunkedGPPlanner(BasePlanner):
         post_filtered = 0
         relaxed = False
         while len(chosen) < size:
-            scores = self._acquisition(mean, torch.diagonal(cov), best)
+            scores = self._acquisition(mean, torch.diagonal(cov), best, kind)
             scores[blocked] = -torch.inf
             if chosen and self._min_changed_variables > 1:
                 changed = (digits[:, None, :] != digits[chosen][None, :, :]).sum(axis=-1).min(axis=1)
@@ -489,6 +534,31 @@ class ChunkedGPPlanner(BasePlanner):
             cov -= torch.outer(column, column) / (column[j] + posterior.noise)
             best = torch.maximum(best, mean[j])
         return [int(pool[j]) for j in chosen], post_filtered, relaxed
+
+    def _merge_rank_by_mean(
+        self,
+        space: dict[str, Any],
+        posterior: "_LatentPosterior",
+        batches: dict[str, list[int]],
+        size: int,
+    ) -> tuple[list[int], list[str]]:
+        """Merge per-acquisition batches, dedupe, rank by predicted mean, keep the top `size`.
+
+        Returns the chosen indices and, for each, the acquisition(s) that proposed it
+        (e.g. "ei", "ucb" or "ei+ucb"). Ties keep EI picks first.
+        """
+        proposers: dict[int, list[str]] = {}
+        for kind, picks in batches.items():
+            for index in picks:
+                proposers.setdefault(index, []).append(kind)
+        if not proposers:
+            return [], []
+        merged = np.asarray(list(proposers), dtype=np.int64)
+        with torch.no_grad():
+            mean, _ = posterior.mean_cov(self._features(self._decode(merged, space), space["blocks"]))
+        order = sorted(range(merged.size), key=lambda i: -float(mean[i]))
+        chosen = [int(merged[i]) for i in order[:size]]
+        return chosen, ["+".join(proposers[index]) for index in chosen]
 
     def _to_parameter_vector(self, index: int, space: dict[str, Any], subspace):  # noqa: ANN001, ANN202
         return ParameterVector().from_dict(self._candidate(index, space), param_space=subspace)

@@ -248,6 +248,7 @@ class ControllerRuntime:
                         {},
                     ),
                     "descriptor_signal": item.get("descriptor_signal", {}),
+                    "proposed_by": item.get("proposed_by", ""),
                     "batch_contract": batch_contract,
                     "batch_validation_report": batch_validation_report,
                     "controller_action": capability.executed_action,

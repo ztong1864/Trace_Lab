@@ -340,10 +340,13 @@ def format_recommendations(data: dict[str, Any]) -> str:
                 str(item.get("recommendation_id", "")),
                 candidate_text,
                 str(item.get("batch_role", "")),
+                str(item.get("proposed_by", "")),
                 rationale,
             ]
         )
-    lines.extend(markdown_table(["rank", "recommendation_id", "candidate", "role", "rationale"], rows))
+    lines.extend(
+        markdown_table(["rank", "recommendation_id", "candidate", "role", "proposed_by", "rationale"], rows)
+    )
     return "\n".join(lines)
 
 

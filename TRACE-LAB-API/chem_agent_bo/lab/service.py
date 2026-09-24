@@ -201,7 +201,10 @@ class LabBOService:
         candidate_pool_size = effective_batch_size
         agent_config: AgenticBOConfig | None = None
         if effective_controller_mode == "agentic":
-            agent_config = _load_agentic_config(agent_config_path or config.agent_config_path)
+            agent_config = _load_agentic_config(
+                agent_config_path or config.agent_config_path,
+                project_dir=project.project_dir,
+            )
             candidate_pool_size = max(
                 effective_batch_size,
                 int(agent_config.orchestrator.shortlist_candidate_pool_size or 12),
@@ -303,6 +306,9 @@ class LabBOService:
             variable_names=active_variables,
             static_conditions=design_space.static_conditions(),
             max_items=candidate_pool_size,
+            proposed_by=(
+                None if planner_error else planner.planner_diagnostics().get("pick_acquisitions")
+            ),
         )
         candidate_pool = _attach_descriptor_context(
             candidate_pool=candidate_pool,
@@ -502,7 +508,10 @@ class LabBOService:
         param_space = design_space.param_space()
         agentic_mode = str(config.controller_mode or "agentic").strip().lower() == "agentic"
         if reflect_results and agentic_mode:
-            agent_config = _load_agentic_config(config.agent_config_path)
+            agent_config = _load_agentic_config(
+                config.agent_config_path,
+                project_dir=project.project_dir,
+            )
             decision_engine = _build_decision_engine(agent_config)
             runtime = _build_lab_controller_runtime(
                 agent_config=agent_config,
@@ -663,7 +672,10 @@ class LabBOService:
                     recommendation,
                 )
 
-        agent_config = _load_agentic_config(config.agent_config_path)
+        agent_config = _load_agentic_config(
+            config.agent_config_path,
+            project_dir=project.project_dir,
+        )
         decision_engine = _build_decision_engine(agent_config)
         runtime = _build_lab_controller_runtime(
             agent_config=agent_config,
@@ -1024,10 +1036,26 @@ def _format_numeric_with_unit(value: float | None, unit: str = "") -> str:
     return f"{raw} {unit_text}" if unit_text else raw
 
 
-def _load_agentic_config(path: str | Path) -> AgenticBOConfig:
+def _load_agentic_config(path: str | Path, *, project_dir: Path) -> AgenticBOConfig:
+    return load_agentic_bo_config(_resolve_agent_config_path(path, project_dir=project_dir))
+
+
+def _resolve_agent_config_path(path: str | Path, *, project_dir: Path) -> Path:
+    """Resolve a relative agent config path against the project folder, then the repo.
+
+    Project-relative paths (e.g. `agent_bo.yaml`) keep a project working after it is
+    moved out of `runs/lab_projects`; repo-relative ones (e.g. `configs/agent_bo.yaml`)
+    keep working as before.
+    """
     raw = Path(path)
-    config_path = raw if raw.is_absolute() else PROJECT_ROOT / raw
-    return load_agentic_bo_config(config_path)
+    if raw.is_absolute():
+        return raw
+    candidates = [Path(project_dir) / raw, PROJECT_ROOT / raw]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    tried = ", ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"Agent config `{path}` not found; tried: {tried}.")
 
 
 def _resolve_api_base(config: AgenticBOConfig) -> str | None:
@@ -1239,11 +1267,15 @@ def _candidate_pool_items(
     variable_names: list[str],
     static_conditions: dict[str, str] | None = None,
     max_items: int,
+    proposed_by: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """Build the planner shortlist; `proposed_by[i]` tags raw candidate i with the
+    acquisition(s) that proposed it (chunked_gp), and is shown to the LLM."""
     items: list[dict[str, Any]] = []
     seen: set[tuple[str, ...]] = set()
     static = dict(static_conditions or {})
-    for raw_candidate in raw_candidates:
+    tags = list(proposed_by or [])
+    for raw_index, raw_candidate in enumerate(raw_candidates):
         optimizer_candidate = _candidate_to_dict(raw_candidate, param_space)
         candidate = _lab_display_candidate(
             design_space,
@@ -1266,6 +1298,8 @@ def _candidate_pool_items(
                 "candidate": candidate,
             }
         )
+        if raw_index < len(tags) and tags[raw_index]:
+            items[-1]["proposed_by"] = str(tags[raw_index])
         if len(items) >= max(1, int(max_items)):
             break
     return items
@@ -1365,6 +1399,7 @@ def _recommendations_from_decision(
             "planner_name": planner_name,
             "planner_error": planner_error,
             "planner_warnings": _planner_warnings(planner_diagnostics),
+            "proposed_by": str(trace_record.get("proposed_by") or ""),
             "batch_role": trace_record.get("batch_role", ""),
             "batch_role_reason": trace_record.get("batch_role_reason", ""),
             "batch_slot": trace_record.get("batch_slot", {}),
@@ -1464,6 +1499,7 @@ def _bo_only_recommendations(
             "evidence_refs": evidence_refs,
             "planner_diagnostics": planner_diagnostics,
             "planner_error": planner_error,
+            "proposed_by": str(item.get("proposed_by") or ""),
             "descriptor_profile": descriptor_profile,
             "descriptor_contrast_to_anchor": descriptor_contrast,
             "descriptor_signal": descriptor_signal,
@@ -1479,6 +1515,7 @@ def _bo_only_recommendations(
             "planner_name": planner_name,
             "planner_error": planner_error,
             "planner_warnings": _planner_warnings(planner_diagnostics),
+            "proposed_by": str(item.get("proposed_by") or ""),
             "controller_action": "keep_planner_batch",
             "descriptor_profile": descriptor_profile,
             "descriptor_contrast_to_anchor": descriptor_contrast,
