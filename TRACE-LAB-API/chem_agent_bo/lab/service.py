@@ -659,9 +659,15 @@ class LabBOService:
         project.write_observations(observations)
         for batch in batches_by_round.values():
             project.write_batch(batch, variable_names=condition_variables)
+        reflection_errors = _reflection_errors(reflections)
         reflection_status = "none"
         if reflections:
-            reflection_status = "completed"
+            if not reflection_errors:
+                reflection_status = "completed"
+            elif len(reflection_errors) == len(reflections):
+                reflection_status = "failed"
+            else:
+                reflection_status = "partial"
         elif pending_reflection_ids:
             reflection_status = "deferred"
         return {
@@ -675,6 +681,7 @@ class LabBOService:
             ),
             "reflections": reflections,
             "reflection_status": reflection_status,
+            "reflection_errors": reflection_errors,
             "reflection_recommendation_ids": pending_reflection_ids,
         }
 
@@ -769,6 +776,7 @@ class LabBOService:
             "project_id": config.project_id,
             "reflections": reflections,
             "reflection_count": len(reflections),
+            "reflection_errors": _reflection_errors(reflections),
         }
 
     def _reflect_completed_recommendation(
@@ -812,6 +820,7 @@ class LabBOService:
                 knowledge_meta=knowledge_meta,
             )
             recommendation["reflection"] = reflection
+            recommendation.pop("reflection_error", None)
             reflection_record = {
                 "run_mode": "lab_tell",
                 "event": "tell_reflection",
@@ -824,6 +833,9 @@ class LabBOService:
                 "created_at": _now_iso(),
             }
         except Exception as exc:  # noqa: BLE001
+            # The measured result is already recorded; keep the failure visible on the
+            # recommendation so the UI/CLI can show it. A later reflection clears it.
+            recommendation["reflection_error"] = f"{type(exc).__name__}: {exc}"
             reflection_record = {
                 "run_mode": "lab_tell",
                 "event": "tell_reflection_error",
@@ -1247,6 +1259,14 @@ def _planner_fallback_summary(*, requested_planner_name: str, planner_error: str
             "candidates, not Bayesian-optimization recommendations."
         ),
     }
+
+
+def _reflection_errors(records: list[dict[str, Any]]) -> list[dict[str, str]]:
+    return [
+        {"recommendation_id": str(record.get("recommendation_id")), "error": str(record.get("error") or "")}
+        for record in records
+        if record.get("event") == "tell_reflection_error"
+    ]
 
 
 def _planner_warnings(planner_diagnostics: dict[str, Any] | None) -> list[str]:

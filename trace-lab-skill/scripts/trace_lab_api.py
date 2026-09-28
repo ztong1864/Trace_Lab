@@ -357,16 +357,20 @@ def format_tell_result(data: dict[str, Any]) -> str:
         status = str(row.get("status") or "unknown")
         counts[status] = counts.get(status, 0) + 1
     status_text = ", ".join(f"{key}={value}" for key, value in sorted(counts.items())) or "none"
-    return "\n".join(
-        [
-            f"Project: {data.get('project_id', '')}",
-            f"Appended: {len(appended)} ({status_text})",
-            f"Observation count: {data.get('observation_count', '')}",
-            f"Completed count: {data.get('completed_observation_count', '')}",
-            f"Best so far: {data.get('best_so_far', '')}",
-            f"Reflection: {data.get('reflection_status', '')}",
-        ]
-    )
+    lines = [
+        f"Project: {data.get('project_id', '')}",
+        f"Appended: {len(appended)} ({status_text})",
+        f"Observation count: {data.get('observation_count', '')}",
+        f"Completed count: {data.get('completed_observation_count', '')}",
+        f"Best so far: {data.get('best_so_far', '')}",
+        f"Reflection: {data.get('reflection_status', '')}",
+    ]
+    for item in data.get("reflection_errors") or []:
+        lines.append(
+            f"WARNING: reflection failed for {item.get('recommendation_id', '')} "
+            f"({single_line(item.get('error', ''))}); the result itself was saved."
+        )
+    return "\n".join(lines)
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> list[str]:

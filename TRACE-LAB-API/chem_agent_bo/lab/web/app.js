@@ -464,6 +464,14 @@ function renderBatchSummary(batch) {
   const plannerNotes = (first.planner_warnings || [])
     .map((note) => `<div class="warning"><strong>Planner note</strong>: ${escapeHtml(note)}</div>`)
     .join("");
+  const failedReflections = (batch?.recommendations || []).filter((item) => item.reflection_error);
+  const reflectionWarning = failedReflections.length
+    ? `<div class="warning"><strong>Reflection failed</strong> for ${failedReflections
+        .map((item) => escapeHtml(item.recommendation_id || ""))
+        .join(", ")}; the results themselves were saved. First error: ${escapeHtml(
+        failedReflections[0].reflection_error
+      )}</div>`
+    : "";
   if (
     !strategy &&
     !rationale &&
@@ -471,7 +479,8 @@ function renderBatchSummary(batch) {
     !evidenceSummary &&
     !staleWarning &&
     !fallbackWarning &&
-    !plannerNotes
+    !plannerNotes &&
+    !reflectionWarning
   ) {
     node.classList.add("empty");
     node.textContent = "Generate a batch to see the batch strategy.";
@@ -487,6 +496,7 @@ function renderBatchSummary(batch) {
     ${constraintText}
     ${fallbackWarning}
     ${plannerNotes}
+    ${reflectionWarning}
     ${evidenceSummary}
     ${staleWarning}
   `;
@@ -739,7 +749,9 @@ async function submitResults() {
       });
       await refreshProjectView();
       const reflectionNote =
-        data.reflection_status === "deferred" ? " Reflection will be added in the background." : "";
+        data.reflection_status === "deferred"
+          ? " Reflection will be added in the background; reload the batch to see any reflection errors."
+          : "";
       setStatus(`Imported ${data.appended.length} results.${reflectionNote}`);
     } catch (error) {
       setStatus(error.message, true);

@@ -592,6 +592,86 @@ class ChunkedGPPlannerTests(unittest.TestCase):
             self.assertTrue(all(tags))
 
 
+class _ScriptedReflectionRuntime:
+    """Stand-in agentic runtime: reflection fails for listed candidates, succeeds otherwise."""
+
+    def __init__(self, failing_catalysts: set[str]) -> None:
+        self.failing_catalysts = failing_catalysts
+
+    def reflect_after_result(self, *, candidate, result, **_kwargs):
+        if candidate.get("Catalyst") in self.failing_catalysts:
+            raise RuntimeError("Error code: 502 - GR_UPSTREAM_REJECTED")
+        return {"insight": f"result {result} noted"}
+
+
+class ReflectionErrorTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.service = LabBOService(projects_root=self._tmp.name)
+        self.project = _create_small_project(
+            self.service, "reflect", planner_name="random", controller_mode="bo_only", batch_size=2
+        )
+        self.service.ask("reflect")
+        config = self.project.load_config()
+        config.controller_mode = "agentic"  # reflection only runs in agentic mode
+        self.project.write_config(config)
+        self.recs = self.project.load_batches()[-1].recommendations
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _runtime(self, failing_catalysts):
+        runtime = _ScriptedReflectionRuntime(failing_catalysts)
+        return mock.patch.multiple(
+            lab_service,
+            _build_decision_engine=mock.MagicMock(return_value=None),
+            _build_lab_controller_runtime=mock.MagicMock(return_value=runtime),
+        )
+
+    def _results(self):
+        return [
+            {"recommendation_id": rec["recommendation_id"], "yield": "12", "status": "completed"}
+            for rec in self.recs
+        ]
+
+    def test_partial_reflection_failure_is_reported_and_kept_on_the_recommendation(self):
+        failing = self.recs[0]["candidate"]["Catalyst"]
+        if failing == self.recs[1]["candidate"]["Catalyst"]:
+            self.skipTest("both random picks share a catalyst")
+        with self._runtime({failing}):
+            told = self.service.tell("reflect", results=self._results())
+        self.assertEqual(told["reflection_status"], "partial")
+        self.assertEqual(
+            [item["recommendation_id"] for item in told["reflection_errors"]],
+            [self.recs[0]["recommendation_id"]],
+        )
+        self.assertIn("GR_UPSTREAM_REJECTED", told["reflection_errors"][0]["error"])
+        self.assertEqual(len(self.project.load_observations().rows), 8)  # results saved anyway
+
+        first, second = self.project.load_batches()[-1].recommendations
+        self.assertIn("GR_UPSTREAM_REJECTED", first["reflection_error"])
+        self.assertNotIn("reflection", first)
+        self.assertNotIn("reflection_error", second)
+        self.assertEqual(second["reflection"], {"insight": "result 12.0 noted"})
+
+        # A later retry that succeeds clears the error.
+        with self._runtime(set()):
+            retried = self.service.reflect_completed_recommendations(
+                "reflect", recommendation_ids=[first["recommendation_id"]]
+            )
+        self.assertEqual(retried["reflection_errors"], [])
+        first = self.project.load_batches()[-1].recommendations[0]
+        self.assertNotIn("reflection_error", first)
+        self.assertEqual(first["reflection"], {"insight": "result 12.0 noted"})
+
+    def test_all_reflections_failing_reports_failed(self):
+        catalysts = {rec["candidate"]["Catalyst"] for rec in self.recs}
+        with self._runtime(catalysts):
+            told = self.service.tell("reflect", results=self._results())
+        self.assertEqual(told["reflection_status"], "failed")
+        self.assertEqual(len(told["reflection_errors"]), 2)
+
+
 class _SlowPrintingPlanner:
     """Prints steadily while it works (as Atlas does), then returns random candidates."""
 
