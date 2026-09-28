@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import csv
 import math
 from dataclasses import dataclass, field
@@ -21,6 +22,14 @@ except ImportError:  # pragma: no cover
 
 
 DESCRIPTOR_PREFIX = "descriptor__"
+
+
+class DescriptorTableError(ValueError):
+    """A descriptor table could not be attached; `report` says why."""
+
+    def __init__(self, message: str, report: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.report = report
 CONTROLLED_CONDITION_ROLES = {
     "controlled",
     "controlled_condition",
@@ -565,6 +574,122 @@ class DesignSpace:
             key = tuple(round(float(value), 12) for value in row)
             groups.setdefault(key, []).append(str(option))
         return [options for options in groups.values() if len(options) > 1]
+
+    def with_descriptor_table(
+        self,
+        variable_name: str,
+        rows: list[dict[str, Any]],
+        *,
+        value_column: str,
+        aliases: dict[str, str] | None = None,
+        replace: bool = False,
+    ) -> tuple["DesignSpace", dict[str, Any]]:
+        """Attach a per-option descriptor table (one row per option) to one variable.
+
+        Rows are matched to the variable's options by exact value, or through `aliases`
+        ({design option value: table value}) when the table spells an option differently
+        (e.g. `CeCl3` for the design's `CeCl3·7H2O`). Nothing is matched loosely: every
+        option must find a row, or DescriptorTableError is raised with the report.
+        `replace` drops the variable's existing descriptors first; otherwise a column that
+        already exists is an error rather than a silent overwrite.
+        """
+        report: dict[str, Any] = {"variable": variable_name, "errors": []}
+        errors: list[str] = report["errors"]
+        variables = copy.deepcopy(self.variables)
+        variable = next((item for item in variables if item.name == variable_name), None)
+        if variable is None:
+            raise DescriptorTableError(f"No variable `{variable_name}` in the design space.", report)
+        if variable.kind == "continuous" or not variable.options:
+            raise DescriptorTableError(f"`{variable_name}` has no options to attach descriptors to.", report)
+        if not rows:
+            raise DescriptorTableError("The descriptor table has no rows.", report)
+        if value_column not in rows[0]:
+            raise DescriptorTableError(
+                f"No `{value_column}` column in the descriptor table; columns: {list(rows[0])}.", report
+            )
+
+        columns = {
+            key: _clean(key)[len(DESCRIPTOR_PREFIX):] if _clean(key).startswith(DESCRIPTOR_PREFIX) else _clean(key)
+            for key in rows[0]
+            if key != value_column
+        }
+        blank = [key for key, name in columns.items() if not name]
+        if blank:
+            errors.append("The descriptor table has a column without a name.")
+        by_value: dict[str, dict[str, Any]] = {}
+        repeated: list[str] = []
+        for row in rows:
+            value = _clean(row.get(value_column))
+            if not value:
+                continue
+            if value in by_value:
+                repeated.append(value)
+            by_value[value] = row
+        if repeated:
+            errors.append(f"Values listed more than once in `{value_column}`: {sorted(set(repeated))}.")
+
+        aliases = {str(key): str(item) for key, item in (aliases or {}).items()}
+        option_values = {option.value for option in variable.options}
+        stray_aliases = sorted(set(aliases) - option_values)
+        if stray_aliases:
+            errors.append(f"Aliases for values that are not options of `{variable_name}`: {stray_aliases}.")
+        existing_columns = sorted({key for option in variable.options for key in option.descriptors})
+        clashing = sorted(set(columns.values()) & set(existing_columns))
+        if clashing and not replace:
+            errors.append(
+                f"`{variable_name}` already has descriptors {clashing}; pass replace=true to swap its descriptors."
+            )
+
+        matched: dict[str, str] = {}
+        unmatched: list[str] = []
+        for option in variable.options:
+            wanted = aliases.get(option.value, option.value)
+            if wanted in by_value:
+                matched[option.value] = wanted
+            else:
+                unmatched.append(option.value)
+        if unmatched:
+            errors.append(
+                f"{len(unmatched)} option(s) of `{variable_name}` have no row in the table: {unmatched}. "
+                "Add rows, or map differently spelled rows with aliases {option: table value}."
+            )
+        used = set(matched.values())
+        report["unused_rows"] = sorted(value for value in by_value if value not in used)
+        report["matched_by_alias"] = {option: table for option, table in matched.items() if option != table}
+
+        non_numeric = sorted(
+            {
+                name
+                for key, name in columns.items()
+                if name
+                for table_value in used
+                if _clean(by_value[table_value].get(key)) and _parse_descriptor_float(by_value[table_value].get(key)) is None
+            }
+        )
+        report["non_numeric_columns"] = non_numeric
+        report["columns"] = sorted(name for name in columns.values() if name)
+        if errors:
+            raise DescriptorTableError(errors[0] if len(errors) == 1 else " ".join(errors), report)
+
+        for option in variable.options:
+            row = by_value[matched[option.value]]
+            descriptors = {} if replace else dict(option.descriptors)
+            for key, name in columns.items():
+                if _clean(row.get(key)) != "":
+                    descriptors[name] = row.get(key)
+            option.descriptors = descriptors
+        updated = DesignSpace(variables)
+        report["numeric_columns"] = _complete_numeric_descriptor_keys(variable)
+        if report["numeric_columns"]:
+            duplicates = updated._duplicate_descriptor_groups(variable_name)
+            if duplicates:
+                same = "; ".join(" = ".join(group) for group in duplicates)
+                errors.append(f"Options of `{variable_name}` would have identical descriptor rows ({same}).")
+                raise DescriptorTableError(errors[0], report)
+        else:
+            errors.append(f"The table gives `{variable_name}` no numeric descriptor that every option has.")
+            raise DescriptorTableError(errors[0], report)
+        return updated, report
 
     def candidate_descriptor_profile(
         self,

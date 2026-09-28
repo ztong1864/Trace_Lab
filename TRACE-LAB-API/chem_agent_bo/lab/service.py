@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import os
 import shutil
 import threading
@@ -63,6 +64,8 @@ EDITABLE_CONFIG_FIELDS = (
     "allow_random_fallback",
 )
 LOCKED_CONFIG_FIELDS = ("project_id", "objective_name", "goal")
+# Largest CSV/JSON text accepted for one part of an upload (design, descriptors, ...).
+MAX_UPLOAD_PART_BYTES = 20 * 1024 * 1024
 
 
 class ProjectBusyError(RuntimeError):
@@ -185,6 +188,51 @@ class LabBOService:
             "registered_at": entry["registered_at"],
             "config_backup_path": str(backup_path) if backup_path else "",
             "check": report,
+        }
+
+    def add_descriptor_table(
+        self,
+        project_id_or_dir: str | Path,
+        *,
+        variable: str,
+        value_column: str,
+        rows: list[dict[str, Any]] | None = None,
+        csv_text: str | None = None,
+        aliases: dict[str, str] | None = None,
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        """Attach a descriptor table (one row per option) to a variable of a project's design space.
+
+        The old design_space.csv is backed up to `_backups/`; nothing is written if any
+        option is left without descriptors (see DesignSpace.with_descriptor_table).
+        """
+        table = _table_rows(rows, csv_text, name="descriptor table")
+        project = LabProject(self.project_path(project_id_or_dir))
+        if not project.config_path.exists():
+            raise FileNotFoundError(f"No project `{project_id_or_dir}`.")
+        lock = _project_ask_lock(project.project_dir)
+        if not lock.acquire(blocking=False):
+            raise ProjectBusyError(
+                f"An ask is running for project `{project.project_dir.name}`; "
+                "change its descriptors after the ask finishes."
+            )
+        try:
+            updated, report = project.load_design_space().with_descriptor_table(
+                variable, table, value_column=value_column, aliases=aliases, replace=replace
+            )
+            backup_dir = _unique_backup_dir(
+                project.project_dir.parent / "_backups" / f"{project.project_dir.name}_design_{_timestamp_for_path()}"
+            )
+            backup_dir.mkdir(parents=True)
+            shutil.copy2(project.design_space_path, backup_dir / "design_space.csv")
+            updated.write_csv(project.design_space_path)
+        finally:
+            lock.release()
+        return {
+            "handle": self.handle_for(project.project_dir),
+            "report": report,
+            "backup_path": str(backup_dir / "design_space.csv"),
+            "descriptor_eligibility": updated.planner_descriptor_eligibility(),
         }
 
     def unregister_project(self, handle: str) -> dict[str, Any]:
@@ -1556,6 +1604,25 @@ def _reflection_errors(records: list[dict[str, Any]]) -> list[dict[str, str]]:
         for record in records
         if record.get("event") == "tell_reflection_error"
     ]
+
+
+def _table_rows(
+    rows: list[dict[str, Any]] | None,
+    csv_text: str | None,
+    *,
+    name: str,
+) -> list[dict[str, Any]]:
+    """Rows given either as JSON objects or as CSV text (exactly one of the two)."""
+    has_rows = bool(rows)
+    has_csv = bool(str(csv_text or "").strip())
+    if has_rows == has_csv:
+        raise ValueError(f"Give the {name} either as rows or as CSV text (exactly one).")
+    if has_rows:
+        return [dict(row) for row in rows or []]
+    text = str(csv_text)
+    if len(text.encode("utf-8")) > MAX_UPLOAD_PART_BYTES:
+        raise ValueError(f"The {name} is larger than {MAX_UPLOAD_PART_BYTES // (1024 * 1024)} MB.")
+    return [dict(row) for row in csv.DictReader(io.StringIO(text.lstrip("﻿")))]
 
 
 def _drop_config_keys(folder: Path, keys: list[str]) -> Path | None:

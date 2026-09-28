@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from chem_agent_bo.lab.design_space import DesignSpace
+from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
 from chem_agent_bo.lab.evidence import (
     BLOCKED_ALLOWED_USES,
     BLOCKED_LEAKAGE_RISKS,
@@ -91,6 +91,28 @@ def create_app(projects_root: str | Path):
             )
         except ProjectCheckError as exc:
             raise HTTPException(status_code=400, detail={"message": str(exc), "check": exc.report}) from exc
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/descriptors")
+    def add_descriptor_table(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Attach a per-option descriptor table (CSV text or rows) to one design variable."""
+        try:
+            return service.add_descriptor_table(
+                project_id,
+                variable=str(payload.get("variable") or ""),
+                value_column=str(payload.get("value_column") or ""),
+                rows=payload.get("rows"),
+                csv_text=payload.get("csv"),
+                aliases=dict(payload.get("aliases") or {}),
+                replace=bool(payload.get("replace", False)),
+            )
+        except DescriptorTableError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "report": exc.report}) from exc
         except ProjectBusyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except FileNotFoundError as exc:

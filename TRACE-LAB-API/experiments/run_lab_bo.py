@@ -17,7 +17,7 @@ if VENDOR_DIR.exists() and str(VENDOR_DIR) not in sys.path:
     # Keep environment packages first to avoid version shadowing.
     sys.path.append(str(VENDOR_DIR))
 
-from chem_agent_bo.lab.design_space import DesignSpace
+from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
 from chem_agent_bo.lab.project import LabProject, ProjectConfig
 from chem_agent_bo.lab.registry import default_handle
 from chem_agent_bo.lab.service import LabBOService, ProjectCheckError, read_results_csv
@@ -94,6 +94,23 @@ def parse_args() -> argparse.Namespace:
 
     check_parser = subparsers.add_parser("check", help="Check a project folder for problems.")
     check_parser.add_argument("--project-dir", required=True)
+
+    descriptor_parser = subparsers.add_parser(
+        "descriptors",
+        help="Attach a per-option descriptor CSV to one design variable (design_space.csv is backed up).",
+    )
+    descriptor_parser.add_argument("--project-dir", required=True)
+    descriptor_parser.add_argument("--variable", required=True)
+    descriptor_parser.add_argument("--csv", required=True, help="Descriptor table, one row per option.")
+    descriptor_parser.add_argument("--value-column", required=True, help="Column holding the option values.")
+    descriptor_parser.add_argument(
+        "--alias",
+        action="append",
+        default=[],
+        metavar="OPTION=TABLE_VALUE",
+        help="Match a design option to a differently spelled table row; repeatable.",
+    )
+    descriptor_parser.add_argument("--replace", action="store_true", help="Drop the variable's old descriptors first.")
     return parser.parse_args()
 
 
@@ -201,6 +218,23 @@ def main() -> None:
                 raise SystemExit(1) from exc
             return
         _print_json(_register_scan(rooted, Path(args.scan).resolve(), dry_run=bool(args.dry_run)))
+        return
+    if args.command == "descriptors":
+        aliases = dict(item.split("=", 1) for item in args.alias)
+        try:
+            _print_json(
+                service.add_descriptor_table(
+                    args.project_dir,
+                    variable=args.variable,
+                    value_column=args.value_column,
+                    csv_text=Path(args.csv).read_text(encoding="utf-8-sig"),
+                    aliases=aliases,
+                    replace=bool(args.replace),
+                )
+            )
+        except DescriptorTableError as exc:
+            _print_json({"changed": False, "error": str(exc), "report": exc.report})
+            raise SystemExit(1) from exc
         return
     if args.command == "unregister":
         _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))

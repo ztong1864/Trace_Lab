@@ -388,5 +388,151 @@ class RegistrationTests(unittest.TestCase):
         self.assertTrue(good_a.exists() and good_b.exists())
 
 
+_CATALYST_TABLE = [
+    {"name": "cat_a", "d1": "1.0", "d2": "0.2"},
+    {"name": "cat_b", "d1": "2.0", "d2": "0.1"},
+    {"name": "cat_c", "d1": "3.5", "d2": "0.9"},
+    {"name": "cat_unused", "d1": "9.0", "d2": "9.0"},
+]
+_SOLVENT_TABLE = [
+    {"solvent": "dce", "eps": "10.4"},
+    {"solvent": "meoh", "eps": "32.7"},
+    {"solvent": "thf", "eps": "7.6"},
+]
+_BASE_TABLE = [
+    {"base": "k2co3", "pka": "10.3"},
+    {"base": "cs2co3", "pka": "10.0"},
+    {"base": "et3n", "pka": "10.8"},
+]
+
+
+class DescriptorTableTests(unittest.TestCase):
+    def setUp(self):
+        from test_lab_mode import _small_design_space
+
+        self.design = _small_design_space()
+
+    def _attach(self, rows, **kwargs):
+        kwargs.setdefault("value_column", "name")
+        return self.design.with_descriptor_table("Catalyst", rows, **kwargs)
+
+    def _error(self, rows, **kwargs):
+        from chem_agent_bo.lab.design_space import DescriptorTableError
+
+        with self.assertRaises(DescriptorTableError) as caught:
+            self._attach(rows, **kwargs)
+        return str(caught.exception), caught.exception.report
+
+    def test_exact_match(self):
+        updated, report = self._attach(_CATALYST_TABLE)
+        self.assertEqual(report["numeric_columns"], ["d1", "d2"])
+        self.assertEqual(report["unused_rows"], ["cat_unused"])
+        self.assertEqual(updated.numeric_descriptor_matrix("Catalyst")["matrix"], [[1.0, 0.2], [2.0, 0.1], [3.5, 0.9]])
+        # The original design space is untouched.
+        self.assertEqual(self.design.numeric_descriptor_matrix("Catalyst")["descriptor_keys"], [])
+
+    def test_aliases_and_prefixed_columns(self):
+        rows = [
+            {"name": "CatA", "descriptor__d1": "1.0"},
+            {"name": "cat_b", "descriptor__d1": "2.0"},
+            {"name": "cat_c", "descriptor__d1": "3.0"},
+        ]
+        updated, report = self._attach(rows, aliases={"cat_a": "CatA"})
+        self.assertEqual(report["matched_by_alias"], {"cat_a": "CatA"})
+        self.assertEqual(updated.numeric_descriptor_matrix("Catalyst")["descriptor_keys"], ["d1"])
+
+    def test_every_option_needs_a_row(self):
+        message, report = self._error(_CATALYST_TABLE[:2])
+        self.assertIn("['cat_c']", message)
+        self.assertIn("aliases", message)
+
+    def test_table_problems(self):
+        self.assertIn("No `formula` column", self._error(_CATALYST_TABLE, value_column="formula")[0])
+        self.assertIn("more than once", self._error(_CATALYST_TABLE + [_CATALYST_TABLE[0]])[0])
+        self.assertIn("not options", self._error(_CATALYST_TABLE, aliases={"cat_x": "cat_a"})[0])
+        same = [dict(row, d1="1.0", d2="0.2") if row["name"] == "cat_b" else row for row in _CATALYST_TABLE]
+        self.assertIn("cat_a = cat_b", self._error(same)[0])
+        text = [dict(row, d1="high", d2="low") for row in _CATALYST_TABLE]
+        message, report = self._error(text)
+        self.assertIn("no numeric descriptor", message)
+        self.assertEqual(report["non_numeric_columns"], ["d1", "d2"])
+        with self.assertRaisesRegex(ValueError, "No variable"):
+            self.design.with_descriptor_table("Ligand", _CATALYST_TABLE, value_column="name")
+
+    def test_existing_columns_need_replace(self):
+        updated, _ = self._attach(_CATALYST_TABLE)
+        self.design = updated
+        self.assertIn("replace=true", self._error(_CATALYST_TABLE)[0])
+        replacement = [{"name": row["name"], "d1": str(float(row["d1"]) * 10)} for row in _CATALYST_TABLE]
+        replaced, _ = self._attach(replacement, replace=True)
+        self.assertEqual(replaced.numeric_descriptor_matrix("Catalyst")["descriptor_keys"], ["d1"])
+        self.assertEqual(replaced.numeric_descriptor_matrix("Catalyst")["matrix"][0], [10.0])
+
+    def test_service_writes_backs_up_and_enables_descriptor_asks(self):
+        import csv
+        import io
+
+        def as_csv(rows):
+            out = io.StringIO()
+            writer = csv.DictWriter(out, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+            return out.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            service = LabBOService(projects_root=root, allow_paths=False)
+            project = _create_small_project(
+                LabBOService(projects_root=root), "desc", planner_name="chunked_gp", planner_use_descriptors=True
+            )
+            client = TestClient(create_app(root))
+            original = project.design_space_path.read_text(encoding="utf-8")
+
+            bad = client.post(
+                "/api/projects/desc/descriptors",
+                json={"variable": "Catalyst", "value_column": "name", "csv": as_csv(_CATALYST_TABLE[:2])},
+            )
+            self.assertEqual(bad.status_code, 400)
+            self.assertIn("cat_c", bad.json()["detail"]["message"])
+            self.assertEqual(project.design_space_path.read_text(encoding="utf-8"), original)
+
+            first = client.post(
+                "/api/projects/desc/descriptors",
+                json={"variable": "Catalyst", "value_column": "name", "csv": as_csv(_CATALYST_TABLE)},
+            )
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(Path(first.json()["backup_path"]).read_text(encoding="utf-8"), original)
+            self.assertFalse(first.json()["descriptor_eligibility"]["eligible"])  # Solvent, Base still missing
+            with self.assertRaisesRegex(ValueError, "no complete numeric descriptors"):
+                service.ask("desc")
+
+            service.add_descriptor_table("desc", variable="Solvent", value_column="solvent", rows=_SOLVENT_TABLE)
+            result = service.add_descriptor_table("desc", variable="Base", value_column="base", csv_text=as_csv(_BASE_TABLE))
+            self.assertTrue(result["descriptor_eligibility"]["eligible"])
+            batch = service.ask("desc")
+            self.assertTrue(batch["planner_use_descriptors"])
+            self.assertEqual(len(batch["recommendations"]), 2)
+
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                service.add_descriptor_table("desc", variable="Base", value_column="base")
+
+    def test_busy_project_is_refused(self):
+        from chem_agent_bo.lab.service import _project_ask_lock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            project = _create_small_project(LabBOService(projects_root=root), "desc")
+            lock = _project_ask_lock(project.project_dir)
+            lock.acquire()
+            try:
+                response = TestClient(create_app(root)).post(
+                    "/api/projects/desc/descriptors",
+                    json={"variable": "Catalyst", "value_column": "name", "rows": _CATALYST_TABLE},
+                )
+            finally:
+                lock.release()
+            self.assertEqual(response.status_code, 409)
+
+
 if __name__ == "__main__":
     unittest.main()
