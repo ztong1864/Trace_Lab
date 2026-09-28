@@ -237,5 +237,156 @@ class ProjectCheckTests(unittest.TestCase):
             self.assertEqual(client.post("/api/projects/check", json={"path": str(Path(tmp) / "none")}).status_code, 404)
 
 
+def _load_cli():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "experiments" / "run_lab_bo.py"
+    spec = importlib.util.spec_from_file_location("run_lab_bo_cli", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class RegistrationTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name)
+        self.root = base / "root"
+        self.outside = base / "lab data"
+        self.root.mkdir()
+        self.service = LabBOService(projects_root=self.root, allow_paths=False)
+
+    def _project(self, name: str) -> Path:
+        _create_small_project(LabBOService(), str(self.outside / name))
+        return self.outside / name
+
+    def _add_config_line(self, folder: Path, line: str) -> None:
+        config = folder / "project.yaml"
+        config.write_text(config.read_text(encoding="utf-8") + line, encoding="utf-8")
+
+    def test_register_uses_the_folder_in_place(self):
+        folder = self._project("screening v2")
+        result = self.service.register_project(folder)
+        self.assertEqual(result["handle"], "screening_v2")
+        self.assertTrue(result["check"]["ok"])
+        self.service.ask("screening_v2", controller_mode="bo_only")
+        self.assertTrue((folder / "recommendations_round_001.json").exists())
+        self.assertEqual(self.service.register_project(self._project("other"), handle="mine")["handle"], "mine")
+
+    def test_failing_check_registers_nothing(self):
+        folder = self._project("broken")
+        path = folder / "observations.csv"
+        path.write_text(path.read_text(encoding="utf-8").replace("cat_c", "cat_z", 1), encoding="utf-8")
+        from chem_agent_bo.lab.service import ProjectCheckError
+
+        with self.assertRaises(ProjectCheckError) as caught:
+            self.service.register_project(folder)
+        self.assertFalse(caught.exception.report["ok"])
+        self.assertEqual(self.service.list_projects(), [])
+
+    def test_drop_config_keys_backs_up_and_fixes_the_config(self):
+        folder = self._project("collab")
+        self._add_config_line(folder, "searching_strategy: balanced\n")
+        original = (folder / "project.yaml").read_text(encoding="utf-8")
+        result = self.service.register_project(folder, drop_config_keys=["searching_strategy"])
+        self.assertTrue(result["check"]["ok"])
+        self.assertEqual(Path(result["config_backup_path"]).read_text(encoding="utf-8"), original)
+        fixed = (folder / "project.yaml").read_text(encoding="utf-8")
+        self.assertNotIn("searching_strategy", fixed)
+        self.assertIn("planner_name: atlas", fixed)
+
+    def test_config_is_restored_when_the_check_still_fails(self):
+        folder = self._project("collab")
+        self._add_config_line(folder, "searching_strategy: balanced\n")
+        path = folder / "observations.csv"
+        path.write_text(path.read_text(encoding="utf-8").replace("cat_c", "cat_z", 1), encoding="utf-8")
+        original = (folder / "project.yaml").read_text(encoding="utf-8")
+        from chem_agent_bo.lab.service import ProjectCheckError
+
+        with self.assertRaises(ProjectCheckError):
+            self.service.register_project(folder, drop_config_keys=["searching_strategy"])
+        self.assertEqual((folder / "project.yaml").read_text(encoding="utf-8"), original)
+
+    def test_refusals(self):
+        folder = self._project("p")
+        with self.assertRaisesRegex(ValueError, "TRACE setting"):
+            self.service.register_project(folder, drop_config_keys=["planner_name"])
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            self.service.register_project("relative/p")
+        with self.assertRaises(FileNotFoundError):
+            self.service.register_project(self.outside)  # no project.yaml
+        _create_small_project(LabBOService(projects_root=self.root), "inside")
+        with self.assertRaisesRegex(ValueError, "already in the projects root"):
+            self.service.register_project(self.root / "inside")
+        from chem_agent_bo.lab.service import ProjectBusyError, _project_ask_lock
+
+        lock = _project_ask_lock(folder)
+        lock.acquire()
+        try:
+            with self.assertRaises(ProjectBusyError):
+                self.service.register_project(folder)
+        finally:
+            lock.release()
+
+    def test_api_register_and_unregister(self):
+        folder = self._project("screening")
+        broken = self._project("broken")
+        self._add_config_line(broken, "searching_strategy: balanced\n")
+        client = TestClient(create_app(self.root))
+
+        ok = client.post("/api/projects/register", json={"path": str(folder)})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        refused = client.post("/api/projects/register", json={"path": str(broken)})
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("searching_strategy", str(refused.json()["detail"]["check"]["errors"]))
+        fixed = client.post(
+            "/api/projects/register", json={"path": str(broken), "drop_config_keys": ["searching_strategy"]}
+        )
+        self.assertEqual(fixed.status_code, 200, fixed.text)
+        self.assertEqual(
+            sorted(item["handle"] for item in client.get("/api/projects").json()["projects"]),
+            ["broken", "screening"],
+        )
+
+        self.assertEqual(client.delete("/api/projects/screening/registration").status_code, 200)
+        self.assertEqual(client.delete("/api/projects/screening/registration").status_code, 404)
+        self.assertTrue((folder / "project.yaml").exists())
+        self.assertEqual([item["handle"] for item in client.get("/api/projects").json()["projects"]], ["broken"])
+
+    def test_cli_scan(self):
+        cli = _load_cli()
+        good_a, good_b = self._project("a"), self._project("b")
+        collab = self._project("collab")
+        self._add_config_line(collab, "searching_strategy: balanced\n")
+        _create_small_project(LabBOService(), str(self.outside / "x" / "same"))
+        _create_small_project(LabBOService(), str(self.outside / "y" / "same"))
+        _create_small_project(LabBOService(), str(self.outside / "_backups" / "old"))
+
+        dry = cli._register_scan(LabBOService(projects_root=self.root), self.outside, dry_run=True)
+        statuses = {
+            Path(item["project_dir"]).relative_to(self.outside.resolve()).as_posix(): item["status"]
+            for item in dry["projects"]
+        }
+        self.assertEqual(
+            statuses,
+            {
+                "a": "would_register",
+                "b": "would_register",
+                "collab": "check_failed",
+                "x/same": "handle_conflict",
+                "y/same": "handle_conflict",
+            },
+        )
+        self.assertEqual(self.service.list_projects(), [])
+
+        real = cli._register_scan(LabBOService(projects_root=self.root), self.outside, dry_run=False)
+        self.assertEqual(real["counts"], {"registered": 2, "check_failed": 1, "handle_conflict": 2})
+        again = cli._register_scan(LabBOService(projects_root=self.root), self.outside, dry_run=False)
+        self.assertEqual(again["counts"]["already_registered"], 2)
+        self.assertEqual(sorted(item["handle"] for item in self.service.list_projects()), ["a", "b"])
+        self.assertTrue(good_a.exists() and good_b.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

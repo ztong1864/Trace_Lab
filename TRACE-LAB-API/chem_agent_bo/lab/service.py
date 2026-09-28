@@ -6,11 +6,12 @@ import csv
 import os
 import shutil
 import threading
-from dataclasses import asdict, replace
+from dataclasses import asdict, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
 from olympus.campaigns import Campaign, ParameterSpace
 from olympus.objects import ParameterContinuous, ParameterVector
 
@@ -26,7 +27,7 @@ from chem_agent_bo.lab.project import (
     ProjectConfig,
     RecommendationBatch,
 )
-from chem_agent_bo.lab.registry import ProjectRegistry, validate_handle
+from chem_agent_bo.lab.registry import ProjectRegistry, default_handle, validate_handle
 from chem_agent_bo.runtime import ActionCapabilityPolicy, ControllerRuntime, ControllerRuntimeConfig
 from chem_agent_bo.runtime.lab_evidence import LabEvidenceProvider
 from chem_agent_bo.utils.run_io import capture_third_party_output
@@ -66,6 +67,14 @@ LOCKED_CONFIG_FIELDS = ("project_id", "objective_name", "goal")
 
 class ProjectBusyError(RuntimeError):
     """An ask is already running for this project."""
+
+
+class ProjectCheckError(ValueError):
+    """A project folder failed the project check; `report` holds the details."""
+
+    def __init__(self, message: str, report: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.report = report
 
 
 # One lock per project folder (per process): two overlapping asks on the same
@@ -133,6 +142,57 @@ class LabBOService:
         from chem_agent_bo.lab.project_check import check_project
 
         return check_project(_existing_absolute_folder(path))
+
+    def register_project(
+        self,
+        path: str | Path,
+        *,
+        handle: str | None = None,
+        drop_config_keys: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Make an existing project folder available by handle, used in place (no copy).
+
+        The folder must pass the project check. `drop_config_keys` removes the listed
+        unknown settings (e.g. from another TRACE fork) from project.yaml after backing
+        it up; if the check still fails, the original project.yaml is put back.
+        """
+        from chem_agent_bo.lab.project_check import check_project
+
+        if self.registry is None:
+            raise ValueError("No projects root configured, so there is no registry.")
+        folder = _existing_absolute_folder(path)
+        if not (folder / "project.yaml").exists():
+            raise FileNotFoundError(f"No project.yaml in {folder}.")
+        if self.projects_root is not None and folder.parent == self.projects_root.resolve():
+            raise ValueError(f"{folder} is already in the projects root as `{folder.name}`.")
+        chosen = validate_handle(handle) if handle else default_handle(folder)
+        lock = _project_ask_lock(folder)
+        if not lock.acquire(blocking=False):
+            raise ProjectBusyError(f"An ask is running for {folder}; register it after the ask finishes.")
+        try:
+            backup_path = _drop_config_keys(folder, list(drop_config_keys or []))
+            report = check_project(folder)
+            if not report["ok"]:
+                if backup_path:
+                    shutil.copy2(backup_path, folder / "project.yaml")
+                raise ProjectCheckError(f"{folder} did not pass the project check.", report)
+            entry = self.registry.add(chosen, folder)
+        finally:
+            lock.release()
+        return {
+            "handle": chosen,
+            "project_dir": entry["path"],
+            "registered_at": entry["registered_at"],
+            "config_backup_path": str(backup_path) if backup_path else "",
+            "check": report,
+        }
+
+    def unregister_project(self, handle: str) -> dict[str, Any]:
+        """Forget a registered project; its folder and files are left untouched."""
+        if self.registry is None:
+            raise ValueError("No projects root configured, so there is no registry.")
+        entry = self.registry.remove(handle)
+        return {"handle": handle, "project_dir": entry.get("path", ""), "files_changed": False}
 
     def project_summary(self, project_id_or_dir: str | Path) -> dict[str, Any]:
         project_dir = self.project_path(project_id_or_dir)
@@ -1496,6 +1556,27 @@ def _reflection_errors(records: list[dict[str, Any]]) -> list[dict[str, str]]:
         for record in records
         if record.get("event") == "tell_reflection_error"
     ]
+
+
+def _drop_config_keys(folder: Path, keys: list[str]) -> Path | None:
+    """Remove unknown settings from project.yaml after a backup; returns the backup path."""
+    if not keys:
+        return None
+    path = folder / "project.yaml"
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    known = {item.name for item in fields(ProjectConfig)}
+    for key in keys:
+        if key in known:
+            raise ValueError(f"`{key}` is a TRACE setting; change it with the settings API instead of dropping it.")
+        if key not in payload:
+            raise ValueError(f"`{key}` is not in {path}.")
+    backup_dir = _unique_backup_dir(folder.parent / "_backups" / f"{folder.name}_config_{_timestamp_for_path()}")
+    backup_dir.mkdir(parents=True)
+    backup = backup_dir / "project.yaml"
+    shutil.copy2(path, backup)
+    kept = {key: value for key, value in payload.items() if key not in set(keys)}
+    path.write_text(yaml.safe_dump(kept, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return backup
 
 
 def _existing_absolute_folder(path: str | Path) -> Path:

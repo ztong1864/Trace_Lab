@@ -15,7 +15,7 @@ from chem_agent_bo.lab.evidence import (
     EvidenceStore,
 )
 from chem_agent_bo.lab.project import LabProject, ProjectConfig
-from chem_agent_bo.lab.service import LabBOService, ProjectBusyError
+from chem_agent_bo.lab.service import LabBOService, ProjectBusyError, ProjectCheckError
 
 
 def create_app(projects_root: str | Path):
@@ -77,6 +77,34 @@ def create_app(projects_root: str | Path):
             return service.check_folder(payload.get("path"))
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/projects/register")
+    def register_project(payload: dict[str, Any]) -> dict[str, Any]:
+        """Use an existing project folder on the server's disk in place, by handle."""
+        try:
+            return service.register_project(
+                payload.get("path"),
+                handle=payload.get("handle") or None,
+                drop_config_keys=list(payload.get("drop_config_keys") or []),
+            )
+        except ProjectCheckError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "check": exc.report}) from exc
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/projects/{project_id}/registration")
+    def unregister_project(project_id: str) -> dict[str, Any]:
+        """Forget a registered project; its files are not touched."""
+        try:
+            return service.unregister_project(project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc.args[0] if exc.args else exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

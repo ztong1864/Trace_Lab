@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -18,7 +19,8 @@ if VENDOR_DIR.exists() and str(VENDOR_DIR) not in sys.path:
 
 from chem_agent_bo.lab.design_space import DesignSpace
 from chem_agent_bo.lab.project import LabProject, ProjectConfig
-from chem_agent_bo.lab.service import LabBOService, read_results_csv
+from chem_agent_bo.lab.registry import default_handle
+from chem_agent_bo.lab.service import LabBOService, ProjectCheckError, read_results_csv
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,7 +70,39 @@ def parse_args() -> argparse.Namespace:
 
     summary_parser = subparsers.add_parser("summary", help="Print lab project summary.")
     summary_parser.add_argument("--project-dir", required=True)
+
+    register_parser = subparsers.add_parser(
+        "register",
+        help="Make existing project folders available to the web API by handle, used in place.",
+    )
+    _add_projects_root_arg(register_parser)
+    target = register_parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--path", help="One project folder (containing project.yaml).")
+    target.add_argument("--scan", help="Register every project folder found under this folder.")
+    register_parser.add_argument("--handle", help="Handle for --path (default: the folder name).")
+    register_parser.add_argument(
+        "--drop-config-key",
+        action="append",
+        default=[],
+        help="Unknown project.yaml setting to remove (backed up first); repeatable. --path only.",
+    )
+    register_parser.add_argument("--dry-run", action="store_true", help="With --scan: check only, register nothing.")
+
+    unregister_parser = subparsers.add_parser("unregister", help="Forget a registered project (files untouched).")
+    _add_projects_root_arg(unregister_parser)
+    unregister_parser.add_argument("--handle", required=True)
+
+    check_parser = subparsers.add_parser("check", help="Check a project folder for problems.")
+    check_parser.add_argument("--project-dir", required=True)
     return parser.parse_args()
+
+
+def _add_projects_root_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--projects-root",
+        default=os.environ.get("TRACE_LAB_PROJECTS_ROOT", "runs/lab_projects"),
+        help="The web API's projects root, where registry.yaml lives.",
+    )
 
 
 def _add_project_args(parser: argparse.ArgumentParser) -> None:
@@ -146,7 +180,70 @@ def main() -> None:
     if args.command == "summary":
         _print_json(LabProject(Path(args.project_dir)).summary())
         return
+    if args.command == "check":
+        from chem_agent_bo.lab.project_check import check_project
+
+        _print_json(check_project(Path(args.project_dir)))
+        return
+    if args.command == "register":
+        rooted = LabBOService(projects_root=args.projects_root)
+        if args.path:
+            try:
+                _print_json(
+                    rooted.register_project(
+                        Path(args.path).resolve(),
+                        handle=args.handle,
+                        drop_config_keys=args.drop_config_key,
+                    )
+                )
+            except ProjectCheckError as exc:
+                _print_json({"registered": False, "error": str(exc), "check": exc.report})
+                raise SystemExit(1) from exc
+            return
+        _print_json(_register_scan(rooted, Path(args.scan).resolve(), dry_run=bool(args.dry_run)))
+        return
+    if args.command == "unregister":
+        _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))
+        return
     raise ValueError(f"Unknown command: {args.command}")
+
+
+def _register_scan(service: LabBOService, folder: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Check (and unless dry_run, register) every project folder under `folder`."""
+    from chem_agent_bo.lab.project_check import check_project
+
+    found = sorted(
+        path.parent
+        for path in folder.rglob("project.yaml")
+        if not any(part == "_backups" or part.startswith(".") for part in path.relative_to(folder).parts)
+    )
+    handles = [default_handle(path) for path in found]
+    results = []
+    for path, handle in zip(found, handles):
+        item: dict[str, Any] = {"project_dir": str(path), "handle": handle}
+        existing = service.registry.handle_for(path)
+        if existing:
+            item.update(status="already_registered", handle=existing)
+        elif handles.count(handle) > 1:
+            item.update(status="handle_conflict", message="Several folders share this name; register them one by one with --path and --handle.")
+        else:
+            report = check_project(path)
+            item.update(errors=report["errors"], warning_count=len(report["warnings"]))
+            if not report["ok"]:
+                item["status"] = "check_failed"
+            elif dry_run:
+                item["status"] = "would_register"
+            else:
+                try:
+                    service.register_project(path, handle=handle)
+                    item["status"] = "registered"
+                except Exception as exc:  # noqa: BLE001 -- keep going with the other folders
+                    item.update(status="failed", message=f"{type(exc).__name__}: {exc}")
+        results.append(item)
+    counts: dict[str, int] = {}
+    for item in results:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    return {"scanned": str(folder), "dry_run": dry_run, "counts": counts, "projects": results}
 
 
 def _config_from_args(args: argparse.Namespace) -> ProjectConfig:
