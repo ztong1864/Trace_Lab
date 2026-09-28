@@ -209,17 +209,27 @@ def reverse_standardize(
     return (data * stds) + means
 
 
+def _copy_bounds(bounds):
+    """Copy normalization bounds without changing their array type or dtype."""
+    if isinstance(bounds, torch.Tensor):
+        return bounds.clone()
+    return np.array(bounds, dtype=float, copy=True)
+
+
 def forward_normalize(
     data: Union[torch.Tensor, np.ndarray],
     min_: Union[torch.Tensor, np.ndarray],
     max_: Union[torch.Tensor, np.ndarray],
 ) -> Union[torch.Tensor, np.ndarray]:
     """forward normalize the data"""
-    ixs = np.where(np.abs(max_ - min_) < 1e-10)[0]
+    # Work on copies: callers pass the planner's stored bounds, which must not be
+    # overwritten in place. (Ported from TRACE-COLLAB bbc7c42.)
+    min_array, max_array = _copy_bounds(min_), _copy_bounds(max_)
+    ixs = np.where(np.abs(max_array - min_array) < 1e-10)[0]
     if not ixs.size == 0:
-        max_[ixs] = np.ones_like(ixs)
-        min_[ixs] = np.zeros_like(ixs)
-    return (data - min_) / (max_ - min_)
+        max_array[ixs] = 1.0
+        min_array[ixs] = 0.0
+    return (data - min_array) / (max_array - min_array)
 
 
 def reverse_normalize(
@@ -228,11 +238,14 @@ def reverse_normalize(
     max_: Union[torch.Tensor, np.ndarray],
 ) -> Union[torch.Tensor, np.ndarray]:
     """un-normlaize the data"""
-    ixs = np.where(np.abs(max_ - min_) < 1e-10)[0]
+    # Work on copies: callers pass the planner's stored bounds, which must not be
+    # overwritten in place. (Ported from TRACE-COLLAB bbc7c42.)
+    min_array, max_array = _copy_bounds(min_), _copy_bounds(max_)
+    ixs = np.where(np.abs(max_array - min_array) < 1e-10)[0]
     if not ixs.size == 0:
-        max_[ixs] = np.ones_like(ixs)
-        min_[ixs] = np.zeros_like(ixs)
-    return data * (max_ - min_) + min_
+        max_array[ixs] = 1.0
+        min_array[ixs] = 0.0
+    return data * (max_array - min_array) + min_array
 
 
 def param_vector_to_dict(

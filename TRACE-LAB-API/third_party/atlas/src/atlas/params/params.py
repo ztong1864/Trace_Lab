@@ -53,9 +53,11 @@ class Parameters:
             # get expanded and indexed raw representations
             self.expanded_raw, self.indexed_raw = self._get_expanded_indexed()
 
-            # get min max of the expanded parameters
-            self._mins_x = np.amin(self.expanded_raw, axis=0)
-            self._maxs_x = np.amax(self.expanded_raw, axis=0)
+            # Scale against the declared design space, not only the observed rows:
+            # a variable seen at one value so far (e.g. every historical run at
+            # 3 mol%) still has other legal values that must stay distinguishable.
+            # (Ported from TRACE-COLLAB bbc7c42.)
+            self._mins_x, self._maxs_x = self._expanded_design_space_bounds()
 
             # scale the expanded representation
             self.expanded_scaled = forward_normalize(
@@ -82,6 +84,35 @@ class Parameters:
 
         else:
             pass
+
+    def _expanded_design_space_bounds(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Per-feature bounds of the expanded representation over the full design space."""
+        mins: list = []
+        maxs: list = []
+        for param in self.param_space:
+            if param.type == "continuous":
+                mins.append(float(param.low))
+                maxs.append(float(param.high))
+            elif param.type == "discrete":
+                options = np.asarray(param.options, dtype=float)
+                mins.append(float(np.min(options)))
+                maxs.append(float(np.max(options)))
+            elif param.type == "categorical":
+                if self.has_descriptors:
+                    descriptors = np.asarray(param.descriptors, dtype=float)
+                    if descriptors.ndim == 1:
+                        descriptors = descriptors.reshape(len(param.options), -1)
+                    mins.extend(np.min(descriptors, axis=0).tolist())
+                    maxs.extend(np.max(descriptors, axis=0).tolist())
+                else:
+                    # one-hot encoding has a fixed [0, 1] domain
+                    mins.extend([0.0] * len(param.options))
+                    maxs.extend([1.0] * len(param.options))
+        min_array = np.asarray(mins, dtype=float)
+        max_array = np.asarray(maxs, dtype=float)
+        degenerate = np.abs(max_array - min_array) < 1e-10
+        max_array[degenerate] = min_array[degenerate] + 1.0
+        return min_array, max_array
 
     @property
     def num_params(self):

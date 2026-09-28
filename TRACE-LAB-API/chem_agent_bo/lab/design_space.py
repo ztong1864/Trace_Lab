@@ -531,6 +531,7 @@ class DesignSpace:
         missing: list[str] = []
         enabled: list[str] = []
         ignored: list[str] = []
+        duplicates: dict[str, list[list[str]]] = {}
         for variable in self.variables:
             if variable.name not in selected:
                 continue
@@ -538,16 +539,32 @@ class DesignSpace:
                 ignored.append(variable.name)
                 continue
             if _complete_numeric_descriptor_keys(variable):
-                enabled.append(variable.name)
+                groups = self._duplicate_descriptor_groups(variable.name)
+                if groups:
+                    duplicates[variable.name] = groups
+                else:
+                    enabled.append(variable.name)
             else:
                 missing.append(variable.name)
         return {
-            "eligible": bool(enabled) and not missing,
+            "eligible": bool(enabled) and not missing and not duplicates,
             "enabled_variables": enabled,
             "missing_descriptor_variables": missing,
+            "duplicate_descriptor_variables": duplicates,
             "ignored_continuous_variables": ignored,
-            "mode": "all_active_categorical_variables_require_complete_numeric_descriptors",
+            "mode": (
+                "all_active_categorical_variables_require_complete_unique_numeric_descriptors"
+            ),
         }
+
+    def _duplicate_descriptor_groups(self, variable_name: str) -> list[list[str]]:
+        """Options whose descriptor rows are identical, so a planner can't tell them apart."""
+        payload = self.numeric_descriptor_matrix(variable_name)
+        groups: dict[tuple[float, ...], list[str]] = {}
+        for option, row in zip(payload["option_values"], payload["matrix"], strict=True):
+            key = tuple(round(float(value), 12) for value in row)
+            groups.setdefault(key, []).append(str(option))
+        return [options for options in groups.values() if len(options) > 1]
 
     def candidate_descriptor_profile(
         self,

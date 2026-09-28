@@ -239,6 +239,10 @@ class LabBOService:
             and effective_planner_name in LAB_DESCRIPTOR_PLANNERS
             and bool(descriptor_eligibility.get("eligible"))
         )
+        if requested_planner_descriptors and effective_planner_name in LAB_DESCRIPTOR_PLANNERS:
+            descriptor_error = _descriptor_ineligibility_error(descriptor_eligibility)
+            if descriptor_error:
+                raise ValueError(descriptor_error)
 
         param_space = design_space.param_space(
             include_descriptors=effective_planner_descriptors,
@@ -1438,6 +1442,31 @@ def _reflection_errors(records: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 def _planner_warnings(planner_diagnostics: dict[str, Any] | None) -> list[str]:
     return [str(item) for item in (planner_diagnostics or {}).get("warnings") or []]
+
+
+def _descriptor_ineligibility_error(eligibility: dict[str, Any]) -> str:
+    """Why requested descriptor features can't be used; empty when they can.
+
+    The ask stops instead of switching to one-hot encoding, which silently gives a
+    much weaker model (e.g. options with identical descriptors become one point).
+    """
+    if eligibility.get("eligible"):
+        return ""
+    reasons: list[str] = []
+    for variable, groups in (eligibility.get("duplicate_descriptor_variables") or {}).items():
+        same = "; ".join(" = ".join(group) for group in groups)
+        reasons.append(f"`{variable}` has options with identical descriptor rows ({same})")
+    missing = eligibility.get("missing_descriptor_variables") or []
+    if missing:
+        reasons.append(f"no complete numeric descriptors for {', '.join(f'`{name}`' for name in missing)}")
+    if not reasons:
+        reasons.append("no categorical variable has descriptors")
+    return (
+        "planner_use_descriptors is true, but descriptor features can't be used: "
+        + "; ".join(reasons)
+        + ". Fix the descriptor values in design_space.csv, or set planner_use_descriptors: false "
+        "to run with one-hot encoding."
+    )
 
 
 def _estimated_design_space_size(design_space: DesignSpace) -> int | None:

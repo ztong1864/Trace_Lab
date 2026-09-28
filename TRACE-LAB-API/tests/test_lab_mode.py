@@ -592,6 +592,152 @@ class ChunkedGPPlannerTests(unittest.TestCase):
             self.assertTrue(all(tags))
 
 
+def _descriptor_design_space(*, duplicate: bool = False) -> DesignSpace:
+    """Small design space with two numeric descriptors per option; `duplicate` makes
+    cat_b and cat_c identical so no planner can tell them apart."""
+    catalyst = (("cat_a", 1.0, 0.2), ("cat_b", 2.0, 0.1), ("cat_c", 2.0 if duplicate else 3.5, 0.1 if duplicate else 0.9))
+    records = []
+    for name, values in (
+        ("Catalyst", catalyst),
+        ("Solvent", (("dce", 10.4, 0.0), ("meoh", 32.7, 1.0), ("thf", 7.6, 0.5))),
+        ("Base", (("k2co3", 10.3, 1.0), ("cs2co3", 10.0, 2.0), ("et3n", 10.8, 0.0))),
+    ):
+        records.extend(
+            {"variable": name, "type": "categorical", "value": value, "descriptor__d1": d1, "descriptor__d2": d2}
+            for value, d1, d2 in values
+        )
+    return DesignSpace.from_long_records(records)
+
+
+class AtlasScalingTests(unittest.TestCase):
+    """Fixes ported from TRACE-COLLAB bbc7c42."""
+
+    def test_features_are_scaled_over_the_design_space_not_the_observed_rows(self):
+        from atlas.params.params import Parameters
+
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            project = service.create_project(
+                "constant",
+                config=ProjectConfig(project_id="constant", objective_name="yield", controller_mode="bo_only"),
+                design_space=_descriptor_design_space(),
+            )
+            # Catalyst is cat_a in every observation, so its observed range is a single point.
+            rows = [
+                {"Catalyst": "cat_a", "Solvent": solvent, "Base": base, "yield": value, "status": "completed"}
+                for solvent, base, value in (("dce", "k2co3", "12"), ("meoh", "cs2co3", "35"), ("thf", "et3n", "20"))
+            ]
+            service.import_observations("constant", rows=rows, source="historical")
+            _design, param_space, campaign = _planner_inputs(project, include_descriptors=True)
+
+        params = Parameters(param_space, campaign.observations, has_descriptors=True)
+        # Catalyst descriptors span d1 1.0-3.5 and d2 0.1-0.9 over all legal options.
+        np.testing.assert_allclose(params._mins_x[:2], [1.0, 0.1])
+        np.testing.assert_allclose(params._maxs_x[:2], [3.5, 0.9])
+        self.assertTrue(np.all(params.expanded_scaled >= 0.0) and np.all(params.expanded_scaled <= 1.0))
+
+    def test_normalize_helpers_do_not_modify_the_bounds_they_are_given(self):
+        from atlas.utils.planner_utils import forward_normalize, reverse_normalize
+
+        for to_array in (np.array, lambda values: torch.tensor(values, dtype=torch.double)):
+            with self.subTest(kind=to_array):
+                low, high = to_array([0.0, 3.0]), to_array([10.0, 3.0])  # second feature is degenerate
+                data = to_array([[5.0, 3.0]])
+                scaled = forward_normalize(data, low, high)
+                restored = reverse_normalize(scaled, low, high)
+                self.assertEqual(list(map(float, low)), [0.0, 3.0])
+                self.assertEqual(list(map(float, high)), [10.0, 3.0])
+                self.assertEqual([float(v) for v in scaled[0]], [0.5, 3.0])
+                self.assertEqual([float(v) for v in restored[0]], [5.0, 3.0])
+                if isinstance(data, torch.Tensor):
+                    self.assertEqual(scaled.dtype, torch.double)
+
+
+class DuplicateDescriptorTests(unittest.TestCase):
+    def test_duplicate_rows_make_descriptors_ineligible(self):
+        eligibility = _descriptor_design_space(duplicate=True).planner_descriptor_eligibility()
+        self.assertFalse(eligibility["eligible"])
+        self.assertEqual(eligibility["duplicate_descriptor_variables"], {"Catalyst": [["cat_b", "cat_c"]]})
+        self.assertNotIn("Catalyst", eligibility["enabled_variables"])
+        self.assertTrue(_descriptor_design_space().planner_descriptor_eligibility()["eligible"])
+
+    def _project(self, service, project_id, design, **config):
+        service.create_project(
+            project_id,
+            config=ProjectConfig(
+                project_id=project_id, objective_name="yield", controller_mode="bo_only", batch_size=2, **config
+            ),
+            design_space=design,
+        )
+        rows = [
+            {"Catalyst": cat, "Solvent": solvent, "Base": base, "yield": value, "status": "completed"}
+            for cat, solvent, base, value in (
+                ("cat_a", "dce", "k2co3", "12"),
+                ("cat_b", "meoh", "cs2co3", "35"),
+                ("cat_c", "thf", "et3n", "20"),
+                ("cat_a", "thf", "cs2co3", "28"),
+            )
+        ]
+        service.import_observations(project_id, rows=rows, source="historical")
+        return LabProject(service.project_path(project_id))
+
+    def test_ask_stops_and_names_the_identical_options(self):
+        for planner_name in ("chunked_gp", "atlas"):
+            with self.subTest(planner=planner_name), tempfile.TemporaryDirectory() as tmp:
+                service = LabBOService(projects_root=tmp)
+                project = self._project(
+                    service,
+                    "dup",
+                    _descriptor_design_space(duplicate=True),
+                    planner_name=planner_name,
+                    planner_use_descriptors=True,
+                )
+                with self.assertRaisesRegex(ValueError, r"`Catalyst` has options with identical descriptor rows \(cat_b = cat_c\)"):
+                    service.ask("dup")
+                self.assertEqual(project.load_batches(), [])
+
+                # The documented way out: run with one-hot encoding on purpose.
+                service.update_project_config("dup", {"planner_use_descriptors": False})
+                batch = service.ask("dup")
+                self.assertFalse(batch["planner_use_descriptors"])
+                self.assertEqual(batch["planner_fallback"], {"used": False})
+                self.assertEqual(len(batch["recommendations"]), 2)
+
+    def test_ask_stops_when_requested_descriptors_are_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            self._project(
+                service, "missing", _small_design_space(), planner_name="chunked_gp", planner_use_descriptors=True
+            )
+            with self.assertRaisesRegex(ValueError, "no complete numeric descriptors for `Catalyst`"):
+                service.ask("missing")
+
+    def test_api_returns_400_with_the_reason(self):
+        from fastapi.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._project(
+                LabBOService(projects_root=tmp),
+                "dup",
+                _descriptor_design_space(duplicate=True),
+                planner_name="chunked_gp",
+                planner_use_descriptors=True,
+            )
+            response = TestClient(create_app(tmp)).post("/api/projects/dup/ask", json={})
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("cat_b = cat_c", response.json()["detail"])
+
+    def test_valid_descriptors_are_used_without_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            self._project(
+                service, "ok", _descriptor_design_space(), planner_name="chunked_gp", planner_use_descriptors=True
+            )
+            batch = service.ask("ok")
+            self.assertTrue(batch["planner_use_descriptors"])
+            self.assertEqual(batch["planner_warnings"], [])
+
+
 class _ScriptedReflectionRuntime:
     """Stand-in agentic runtime: reflection fails for listed candidates, succeeds otherwise."""
 
