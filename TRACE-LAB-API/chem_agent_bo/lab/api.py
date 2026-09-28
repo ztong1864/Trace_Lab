@@ -70,6 +70,25 @@ def create_app(projects_root: str | Path):
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/projects/check")
+    def check_folder(payload: dict[str, Any]) -> dict[str, Any]:
+        """Check a project folder on the server's disk before registering it."""
+        try:
+            return service.check_folder(payload.get("path"))
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/check")
+    def check_project(project_id: str) -> dict[str, Any]:
+        try:
+            return service.check_project(project_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/projects/{project_id}")
     def project_summary(project_id: str) -> dict[str, Any]:
         try:

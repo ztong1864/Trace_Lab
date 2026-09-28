@@ -131,5 +131,111 @@ class HandleApiTests(unittest.TestCase):
             self.assertIn(response.status_code, {400, 404, 405})
 
 
+class ProjectCheckTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.folder = Path(self._tmp.name) / "proj"
+        _create_small_project(LabBOService(), str(self.folder), batch_size=2)
+
+    def _check(self):
+        from chem_agent_bo.lab.project_check import check_project
+
+        return check_project(self.folder)
+
+    def _messages(self, report, kind="errors"):
+        return " | ".join(f"{item['file']}:{item.get('line', '')}:{item['message']}" for item in report[kind])
+
+    def test_clean_project_passes_with_facts(self):
+        LabBOService().ask(str(self.folder))
+        report = self._check()
+        self.assertTrue(report["ok"], self._messages(report))
+        self.assertEqual(report["facts"]["combination_count"], 27)
+        self.assertEqual(report["facts"]["observation_count"], 6)
+        self.assertEqual(report["facts"]["completed_observation_count"], 6)
+        self.assertEqual(report["facts"]["recommendation_rounds"], 1)
+        self.assertEqual(report["facts"]["pending_recommendation_count"], 2)
+        self.assertEqual(report["facts"]["variables"], {"Catalyst": 3, "Solvent": 3, "Base": 3})
+
+    def test_unknown_config_key_is_an_error(self):
+        config = self.folder / "project.yaml"
+        config.write_text(config.read_text(encoding="utf-8") + "searching_strategy: balanced\n", encoding="utf-8")
+        report = self._check()
+        self.assertFalse(report["ok"])
+        self.assertIn("`searching_strategy`", self._messages(report))
+        self.assertIn("drop_config_keys", self._messages(report))
+
+    def test_observation_value_outside_the_design_space_names_the_line(self):
+        path = self.folder / "observations.csv"
+        path.write_text(path.read_text(encoding="utf-8").replace("cat_c", "cat_z", 1), encoding="utf-8")
+        report = self._check()
+        self.assertFalse(report["ok"])
+        (error,) = [item for item in report["errors"] if item["file"] == "observations.csv"]
+        self.assertIn("`cat_z`", error["message"])
+        self.assertIn("line", error)
+
+    def test_completed_row_without_a_number_is_an_error(self):
+        path = self.folder / "observations.csv"
+        path.write_text(path.read_text(encoding="utf-8").replace(",12.0,", ",n.d.,", 1), encoding="utf-8")
+        self.assertIn("numeric `yield`", self._messages(self._check()))
+
+    def test_duplicate_descriptors_are_an_error_when_descriptors_are_requested(self):
+        from test_lab_mode import _descriptor_design_space
+
+        _descriptor_design_space(duplicate=True).write_csv(self.folder / "design_space.csv")
+        config = self.folder / "project.yaml"
+        config.write_text(
+            config.read_text(encoding="utf-8").replace("planner_use_descriptors: false", "planner_use_descriptors: true"),
+            encoding="utf-8",
+        )
+        self.assertIn("cat_b = cat_c", self._messages(self._check()))
+
+    def test_agentic_without_an_agent_config_is_an_error(self):
+        config = self.folder / "project.yaml"
+        text = config.read_text(encoding="utf-8").replace("controller_mode: bo_only", "controller_mode: agentic")
+        text = text.replace("agent_config_path: configs/agent_bo.yaml", "agent_config_path: missing_agent.yaml")
+        config.write_text(text, encoding="utf-8")
+        self.assertIn("missing_agent.yaml", self._messages(self._check()))
+
+    def test_round_gap_is_an_error(self):
+        LabBOService().ask(str(self.folder))
+        for suffix in ("json", "csv"):
+            (self.folder / f"recommendations_round_001.{suffix}").rename(self.folder / f"recommendations_round_002.{suffix}")
+        messages = self._messages(self._check())
+        self.assertIn("without gaps", messages)
+        self.assertIn("expected `round_002`", messages)
+
+    def test_evidence_problems(self):
+        cards = [
+            {"card_id": "c1", "source": "s", "summary": "x", "mapping_status": "direct", "variable_scope": ["Catalyst"]},
+            {"card_id": "c1", "source": "s", "summary": "y", "mapping_status": "same_redox_manifold"},
+            {"card_id": "c2", "source": "s", "summary": "z", "variable_scope": ["Ligand"]},
+        ]
+        import json
+
+        (self.folder / "evidence_cards.jsonl").write_text(
+            "\n".join(json.dumps(card) for card in cards) + "\n", encoding="utf-8"
+        )
+        report = self._check()
+        self.assertIn("card_id `c1` appears 2 times", self._messages(report))
+        warnings = self._messages(report, "warnings")
+        self.assertIn("`same_redox_manifold`", warnings)
+        self.assertIn("`Ligand`", warnings)
+        self.assertEqual(report["facts"]["evidence_card_count"], 3)
+
+    def test_check_endpoints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "root"
+            _create_small_project(LabBOService(projects_root=root), "inside")
+            client = TestClient(create_app(root))
+            self.assertTrue(client.get("/api/projects/inside/check").json()["ok"])
+            self.assertEqual(client.get("/api/projects/nothing/check").status_code, 404)
+            by_path = client.post("/api/projects/check", json={"path": str(self.folder)})
+            self.assertEqual(by_path.status_code, 200, by_path.text)
+            self.assertTrue(by_path.json()["ok"])
+            self.assertEqual(client.post("/api/projects/check", json={"path": "relative/folder"}).status_code, 400)
+            self.assertEqual(client.post("/api/projects/check", json={"path": str(Path(tmp) / "none")}).status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

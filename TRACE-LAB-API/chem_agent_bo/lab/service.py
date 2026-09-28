@@ -119,6 +119,21 @@ class LabBOService:
             items.append(_project_listing(handle, Path(str(entry.get("path") or "")), registered=True))
         return items
 
+    def check_project(self, project_id_or_dir: str | Path) -> dict[str, Any]:
+        """Consistency report (errors, warnings, facts) for a known project."""
+        from chem_agent_bo.lab.project_check import check_project
+
+        project_dir = self.project_path(project_id_or_dir)
+        if not (project_dir / "project.yaml").exists():
+            raise FileNotFoundError(f"No project `{project_id_or_dir}`.")
+        return {**check_project(project_dir), "handle": self.handle_for(project_dir)}
+
+    def check_folder(self, path: str | Path) -> dict[str, Any]:
+        """Consistency report for a folder on the server's disk, e.g. before registering it."""
+        from chem_agent_bo.lab.project_check import check_project
+
+        return check_project(_existing_absolute_folder(path))
+
     def project_summary(self, project_id_or_dir: str | Path) -> dict[str, Any]:
         project_dir = self.project_path(project_id_or_dir)
         return {
@@ -1481,6 +1496,15 @@ def _reflection_errors(records: list[dict[str, Any]]) -> list[dict[str, str]]:
         for record in records
         if record.get("event") == "tell_reflection_error"
     ]
+
+
+def _existing_absolute_folder(path: str | Path) -> Path:
+    folder = Path(str(path or "").strip())
+    if not str(path or "").strip() or not folder.is_absolute():
+        raise ValueError(f"Give an absolute folder path on the server; got `{path}`.")
+    if not folder.is_dir():
+        raise FileNotFoundError(f"Folder not found: {folder}")
+    return folder.resolve()
 
 
 def _project_listing(handle: str, project_dir: Path, *, registered: bool) -> dict[str, Any]:
