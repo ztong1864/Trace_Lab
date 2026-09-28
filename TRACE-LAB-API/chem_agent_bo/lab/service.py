@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import shutil
+import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,17 @@ LAB_EVIDENCE_TARGET_NODES = (
     "reflection_action",
     "lab_batch_composition",
 )
+
+# One lock per project folder (per process): two overlapping asks on the same
+# project would compute the same next round id and overwrite each other's batch.
+_ASK_LOCKS: dict[str, threading.Lock] = {}
+_ASK_LOCKS_GUARD = threading.Lock()
+
+
+def _project_ask_lock(project_dir: Path) -> threading.Lock:
+    key = os.path.normcase(str(Path(project_dir).resolve()))
+    with _ASK_LOCKS_GUARD:
+        return _ASK_LOCKS.setdefault(key, threading.Lock())
 
 
 class LabBOService:
@@ -142,7 +154,36 @@ class LabBOService:
         agent_config_path: str | None = None,
         planner_use_descriptors: bool | None = None,
     ) -> dict[str, Any]:
+        """Generate the next recommendation batch; one ask per project at a time."""
         project = LabProject(self.project_path(project_id_or_dir))
+        lock = _project_ask_lock(project.project_dir)
+        if not lock.acquire(blocking=False):
+            raise RuntimeError(
+                f"An ask is already running for project `{project.project_dir.name}`; "
+                "wait for it to finish before requesting another batch."
+            )
+        try:
+            return self._ask_unlocked(
+                project,
+                batch_size=batch_size,
+                planner_name=planner_name,
+                controller_mode=controller_mode,
+                agent_config_path=agent_config_path,
+                planner_use_descriptors=planner_use_descriptors,
+            )
+        finally:
+            lock.release()
+
+    def _ask_unlocked(
+        self,
+        project: LabProject,
+        *,
+        batch_size: int | None,
+        planner_name: str | None,
+        controller_mode: str | None,
+        agent_config_path: str | None,
+        planner_use_descriptors: bool | None,
+    ) -> dict[str, Any]:
         config = project.load_config()
         design_space = project.load_design_space()
         observations = project.load_observations()

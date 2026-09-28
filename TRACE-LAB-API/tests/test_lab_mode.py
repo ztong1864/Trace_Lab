@@ -2,7 +2,10 @@ import collections
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -12,6 +15,7 @@ import torch
 from chem_agent_bo.bo.atlas_bo import AtlasBOTool
 from chem_agent_bo.bo.base import ExclusionConstraint
 from chem_agent_bo.bo.chunked_gp import ChunkedGPPlanner, _LatentPosterior, _merge_top_k
+from chem_agent_bo.bo.random_bo import RandomPlanner
 from chem_agent_bo.config.schema import AgenticBOConfig
 from chem_agent_bo.lab import service as lab_service
 from chem_agent_bo.lab.api import create_app
@@ -586,6 +590,90 @@ class ChunkedGPPlannerTests(unittest.TestCase):
             self.assertEqual(len(tags), 4)
             self.assertTrue(set(tags) <= {"ei", "ucb", "ei+ucb"})
             self.assertTrue(all(tags))
+
+
+class _SlowPrintingPlanner:
+    """Prints steadily while it works (as Atlas does), then returns random candidates."""
+
+    def __init__(self, tag: str, seconds: float) -> None:
+        self.tag = tag
+        self.seconds = seconds
+        self.inner = RandomPlanner(seed=1)
+
+    def suggest_shortlist(self, **kwargs):
+        end = time.time() + self.seconds
+        while time.time() < end:
+            print(f"planner progress {self.tag}")
+            time.sleep(0.02)
+        return self.inner.suggest_shortlist(**kwargs)
+
+    def planner_diagnostics(self):
+        return {"planner_name": "atlas"}
+
+
+class ConcurrentAskTests(unittest.TestCase):
+    """The web server runs requests in a thread pool, so asks can overlap."""
+
+    @staticmethod
+    def _slow_planners(seconds_by_thread: dict[str, float]):
+        def build(_name, **_kwargs):
+            tag = threading.current_thread().name
+            return _SlowPrintingPlanner(tag, seconds_by_thread[tag])
+
+        return mock.patch.object(lab_service, "build_planner", side_effect=build)
+
+    def test_overlapping_asks_keep_output_in_their_own_logs(self):
+        stdout_before, stderr_before = sys.stdout, sys.stderr
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            for project_id in ("p1", "p2"):
+                _create_small_project(service, project_id, batch_size=1)
+            outcomes: dict = {}
+
+            def ask(project_id):
+                try:
+                    outcomes[project_id] = service.ask(project_id)["planner_fallback"]
+                except Exception as exc:  # noqa: BLE001
+                    outcomes[project_id] = f"{type(exc).__name__}: {exc}"
+
+            # p1 starts first and finishes first -- the order that used to leave the
+            # process-wide stdout pointing at p1's closed log file. The old code only
+            # crashed a planner on the second overlap, so overlap twice.
+            for _ in range(2):
+                with self._slow_planners({"p1": 0.6, "p2": 1.0}):
+                    first = threading.Thread(target=ask, args=("p1",), name="p1")
+                    second = threading.Thread(target=ask, args=("p2",), name="p2")
+                    first.start()
+                    time.sleep(0.2)
+                    second.start()
+                    first.join()
+                    second.join()
+                self.assertEqual(outcomes, {"p1": {"used": False}, "p2": {"used": False}})
+                self.assertIs(sys.stdout, stdout_before)
+                self.assertIs(sys.stderr, stderr_before)
+                self.assertFalse(sys.stdout.closed)
+
+            for project_id, other in (("p1", "p2"), ("p2", "p1")):
+                log = (Path(tmp) / project_id / "logs" / "third_party.log").read_text(encoding="utf-8")
+                self.assertIn(f"planner progress {project_id}", log)
+                self.assertNotIn(f"planner progress {other}", log)
+
+    def test_second_ask_on_same_project_is_rejected_while_one_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            project = _create_small_project(service, "p1", batch_size=1)
+            with self._slow_planners({"first_ask": 0.8, "MainThread": 0.0}):
+                first = threading.Thread(target=service.ask, args=("p1",), name="first_ask")
+                first.start()
+                time.sleep(0.2)
+                with self.assertRaisesRegex(RuntimeError, "already running for project `p1`"):
+                    service.ask("p1")
+                first.join()
+                self.assertEqual([batch.round_id for batch in project.load_batches()], ["round_001"])
+                service.ask("p1")  # the lock is released once the first ask finishes
+            self.assertEqual(
+                [batch.round_id for batch in project.load_batches()], ["round_001", "round_002"]
+            )
 
 
 if __name__ == "__main__":
