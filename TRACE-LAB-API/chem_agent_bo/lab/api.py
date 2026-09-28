@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
+from chem_agent_bo.lab.design_space import DescriptorTableError
 from chem_agent_bo.lab.evidence import (
     BLOCKED_ALLOWED_USES,
     BLOCKED_LEAKAGE_RISKS,
     EvidenceCard,
+    EvidenceImportError,
     EvidenceStore,
 )
 from chem_agent_bo.lab.project import LabProject, ProjectConfig
@@ -53,20 +54,37 @@ def create_app(projects_root: str | Path):
 
     @app.post("/api/projects")
     def create_project(payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a project from uploaded parts, all or nothing.
+
+        Design space as `design_records` or `design_csv`; optional `descriptor_tables`
+        ([{variable, value_column, csv or rows, aliases?, replace?}]), `observations` or
+        `observations_csv`, and `evidence_cards`, `evidence_jsonl` or `evidence_csv`.
+        """
         try:
             project_id = str(payload.get("project_id") or payload.get("config", {}).get("project_id") or "")
             config_payload = dict(payload.get("config") or {})
             config_payload["project_id"] = project_id
-            config = ProjectConfig(**config_payload)
-            design_records = list(payload.get("design_records") or [])
-            design_space = DesignSpace.from_long_records(design_records)
-            project = service.create_project(
+            return service.upload_project(
                 project_id,
-                config=config,
-                design_space=design_space,
+                config=ProjectConfig(**config_payload),
+                design_records=payload.get("design_records"),
+                design_csv=payload.get("design_csv"),
+                descriptor_tables=list(payload.get("descriptor_tables") or []),
+                observations=payload.get("observations"),
+                observations_csv=payload.get("observations_csv"),
+                observation_source=str(payload.get("observation_source") or "historical"),
+                allow_duplicate_observations=bool(payload.get("allow_duplicate_observations", False)),
+                evidence_cards=payload.get("evidence_cards"),
+                evidence_jsonl=payload.get("evidence_jsonl"),
+                evidence_csv=payload.get("evidence_csv"),
                 overwrite=bool(payload.get("overwrite", False)),
             )
-            return project.summary()
+        except DescriptorTableError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "report": exc.report}) from exc
+        except ProjectCheckError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "check": exc.report}) from exc
+        except EvidenceImportError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "problems": exc.problems}) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

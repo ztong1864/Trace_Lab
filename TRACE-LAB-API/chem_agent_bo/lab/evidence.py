@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -158,6 +159,68 @@ class EvidenceStore:
                 :limit
             ]
         ]
+
+
+class EvidenceImportError(ValueError):
+    """Evidence cards failed validation on import; `problems` lists every issue found."""
+
+    def __init__(self, message: str, problems: list[str]) -> None:
+        super().__init__(message)
+        self.problems = problems
+
+
+def parse_evidence_upload(
+    *,
+    cards: list[dict[str, Any]] | None = None,
+    jsonl: str | None = None,
+    csv_text: str | None = None,
+) -> list[EvidenceCard]:
+    """Strictly validate uploaded evidence cards (exactly one source).
+
+    Unlike loading a project's own file, nothing is silently repaired here: a missing
+    card_id or summary, a repeated card_id, or a mapping_status outside
+    ALLOWED_MAPPING_STATUSES (which loading would quietly turn into `background`) is an
+    error, and all problems are reported together.
+    """
+    given = [source for source in (cards, jsonl, csv_text) if source]
+    if len(given) != 1:
+        raise EvidenceImportError("Give the evidence cards either as cards, as JSONL or as CSV (exactly one).", [])
+    raw: list[tuple[str, dict[str, Any]]] = []
+    problems: list[str] = []
+    if cards:
+        raw = [(f"card {index}", dict(item)) for index, item in enumerate(cards, start=1)]
+    elif jsonl:
+        for number, line in enumerate(str(jsonl).splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                raw.append((f"line {number}", dict(json.loads(line))))
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                problems.append(f"line {number}: not a JSON object ({exc}).")
+    else:
+        reader = csv.DictReader(io.StringIO(str(csv_text).lstrip("﻿")))
+        raw = [(f"line {index + 2}", dict(row)) for index, row in enumerate(reader)]
+    seen: dict[str, str] = {}
+    parsed: list[EvidenceCard] = []
+    for where, payload in raw:
+        card_id = str(payload.get("card_id") or payload.get("id") or "").strip()
+        if not card_id:
+            problems.append(f"{where}: missing card_id.")
+            continue
+        if card_id in seen:
+            problems.append(f"{where}: card_id `{card_id}` repeats {seen[card_id]}.")
+        seen.setdefault(card_id, where)
+        if not str(payload.get("summary") or payload.get("content") or "").strip():
+            problems.append(f"{where} ({card_id}): empty summary.")
+        status = str(payload.get("mapping_status") or "background").strip().lower()
+        if status not in ALLOWED_MAPPING_STATUSES:
+            problems.append(
+                f"{where} ({card_id}): mapping_status `{status}` must be one of {sorted(ALLOWED_MAPPING_STATUSES)}."
+            )
+        parsed.append(_card_from_dict(payload))
+    if problems:
+        raise EvidenceImportError(f"{len(problems)} problem(s) in the evidence cards; nothing was imported.", problems)
+    return [card.normalized() for card in parsed]
 
 
 def _card_from_dict(payload: dict[str, Any]) -> EvidenceCard:

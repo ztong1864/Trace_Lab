@@ -7,6 +7,7 @@ import io
 import os
 import shutil
 import threading
+import uuid
 from dataclasses import asdict, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +21,7 @@ from chem_agent_bo.bo.base import ExclusionConstraint, normalize_acquisition_typ
 from chem_agent_bo.bo.registry import build_planner, supported_acquisitions, validate_planner_options
 from chem_agent_bo.config import load_agentic_bo_config
 from chem_agent_bo.config.schema import AgenticBOConfig
-from chem_agent_bo.lab.design_space import DesignSpace
+from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
 from chem_agent_bo.lab.evidence import EvidenceStore
 from chem_agent_bo.lab.project import (
     LabProject,
@@ -188,6 +189,122 @@ class LabBOService:
             "registered_at": entry["registered_at"],
             "config_backup_path": str(backup_path) if backup_path else "",
             "check": report,
+        }
+
+    def upload_project(
+        self,
+        handle: str,
+        *,
+        config: ProjectConfig,
+        design_records: list[dict[str, Any]] | None = None,
+        design_csv: str | None = None,
+        descriptor_tables: list[dict[str, Any]] | None = None,
+        observations: list[dict[str, Any]] | None = None,
+        observations_csv: str | None = None,
+        observation_source: str = "historical",
+        allow_duplicate_observations: bool = False,
+        evidence_cards: list[dict[str, Any]] | None = None,
+        evidence_jsonl: str | None = None,
+        evidence_csv: str | None = None,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Create a project in the projects root from uploaded parts, all or nothing.
+
+        The project is built in a hidden temporary folder: design space, descriptor
+        tables, settings validation, observations, evidence cards, then the full project
+        check. Only if every step passes is it moved into place; otherwise the temporary
+        folder is removed and nothing changes. With `overwrite`, an existing project
+        without observations or batches is replaced and kept in `_backups/`.
+        """
+        from chem_agent_bo.lab.evidence import parse_evidence_upload
+        from chem_agent_bo.lab.project_check import check_project
+
+        if self.projects_root is None:
+            raise ValueError("No projects root configured.")
+        handle = validate_handle(handle)
+        if self.registry is not None and self.registry.resolve(handle) is not None:
+            raise FileExistsError(f"`{handle}` is the handle of a registered project; choose another project id.")
+        target = self.projects_root / handle
+        if target.exists():
+            if not overwrite:
+                raise FileExistsError(f"Lab project already exists: {target}")
+            existing = LabProject(target)
+            if (existing.observations_path.exists() and existing.load_observations().rows) or list(
+                target.glob("recommendations_round_*.json")
+            ):
+                raise FileExistsError(
+                    f"Refusing to overwrite `{handle}`: it has observations or recommendation batches. "
+                    "Change settings with PATCH /api/projects/{project_id}/config, or reset the project first."
+                )
+
+        design = DesignSpace.from_long_records(_table_rows(design_records, design_csv, name="design space"))
+        descriptor_reports = []
+        for index, table in enumerate(descriptor_tables or [], start=1):
+            try:
+                design, report = design.with_descriptor_table(
+                    str(table.get("variable") or ""),
+                    _table_rows(table.get("rows"), table.get("csv"), name=f"descriptor table {index}"),
+                    value_column=str(table.get("value_column") or ""),
+                    aliases=dict(table.get("aliases") or {}),
+                    replace=bool(table.get("replace", False)),
+                )
+            except DescriptorTableError as exc:
+                exc.report["table_index"] = index
+                raise
+            descriptor_reports.append(report)
+        cards = None
+        if evidence_cards or evidence_jsonl or evidence_csv:
+            for text, name in ((evidence_jsonl, "evidence JSONL"), (evidence_csv, "evidence CSV")):
+                _check_upload_size(text, name)
+            cards = parse_evidence_upload(cards=evidence_cards, jsonl=evidence_jsonl, csv_text=evidence_csv)
+        observation_rows = (
+            _table_rows(observations, observations_csv, name="observations")
+            if observations or str(observations_csv or "").strip()
+            else []
+        )
+
+        config = replace(config, project_id=config.project_id or handle).normalized()
+        if cards is not None and not config.evidence_file.lower().endswith(".jsonl"):
+            config = replace(config, evidence_file="evidence_cards.jsonl")
+        self.projects_root.mkdir(parents=True, exist_ok=True)
+        temp = self.projects_root / f".upload-{handle}-{uuid.uuid4().hex[:8]}"
+        try:
+            _validate_project_config(config, project_dir=temp)
+            project = LabProject.create(temp, config=config, design_space=design)
+            imported = None
+            if observation_rows:
+                imported = LabBOService().import_observations(
+                    temp,
+                    rows=observation_rows,
+                    source=observation_source or "historical",
+                    allow_duplicates=allow_duplicate_observations,
+                )
+            if cards is not None:
+                EvidenceStore(cards).write_jsonl(project.evidence_path)
+            report = check_project(temp)
+            if not report["ok"]:
+                raise ProjectCheckError("The uploaded project did not pass the project check.", report)
+            backup_path = ""
+            if target.exists():
+                backup = _unique_backup_dir(
+                    self.projects_root / "_backups" / f"{handle}_replaced_{_timestamp_for_path()}"
+                )
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(target), str(backup))
+                backup_path = str(backup)
+            os.replace(temp, target)
+        finally:
+            if temp.exists():
+                shutil.rmtree(temp, ignore_errors=True)
+        return {
+            **self.project_summary(handle),
+            "check": {**report, "project_dir": str(target)},
+            "descriptor_tables": descriptor_reports,
+            "observations_import": (
+                {key: imported[key] for key in ("imported_count", "skipped_count", "skipped")} if imported else None
+            ),
+            "evidence_card_count": len(cards) if cards is not None else 0,
+            "replaced_backup_path": backup_path,
         }
 
     def add_descriptor_table(
@@ -1620,9 +1737,13 @@ def _table_rows(
     if has_rows:
         return [dict(row) for row in rows or []]
     text = str(csv_text)
-    if len(text.encode("utf-8")) > MAX_UPLOAD_PART_BYTES:
-        raise ValueError(f"The {name} is larger than {MAX_UPLOAD_PART_BYTES // (1024 * 1024)} MB.")
+    _check_upload_size(text, name)
     return [dict(row) for row in csv.DictReader(io.StringIO(text.lstrip("﻿")))]
+
+
+def _check_upload_size(text: str | None, name: str) -> None:
+    if text and len(str(text).encode("utf-8")) > MAX_UPLOAD_PART_BYTES:
+        raise ValueError(f"The {name} is larger than {MAX_UPLOAD_PART_BYTES // (1024 * 1024)} MB.")
 
 
 def _drop_config_keys(folder: Path, keys: list[str]) -> Path | None:

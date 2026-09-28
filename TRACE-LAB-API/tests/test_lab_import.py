@@ -534,5 +534,143 @@ class DescriptorTableTests(unittest.TestCase):
             self.assertEqual(response.status_code, 409)
 
 
+def _as_csv(rows):
+    import csv
+    import io
+
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+_UPLOAD_OBSERVATIONS = [
+    {"Catalyst": cat, "Solvent": solvent, "Base": base, "yield": value, "status": "completed"}
+    for cat, solvent, base, value in (
+        ("cat_a", "dce", "k2co3", "12"),
+        ("cat_b", "meoh", "cs2co3", "35"),
+        ("cat_c", "thf", "et3n", "20"),
+        ("cat_a", "thf", "cs2co3", "28"),
+    )
+]
+_UPLOAD_CARDS = [
+    {"card_id": "c1", "source": "paper A", "summary": "Base matters.", "mapping_status": "variable_level", "variable_scope": ["Base"]},
+    {"card_id": "c2", "source": "paper B", "summary": "DCE works.", "mapping_status": "same_reaction_family"},
+]
+
+
+class UploadTests(unittest.TestCase):
+    def setUp(self):
+        from test_lab_mode import _small_design_space
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "root"
+        self.client = TestClient(create_app(self.root))
+        self.design_csv = _as_csv(_small_design_space().to_long_records())
+
+    def _payload(self, **overrides):
+        import json
+
+        payload = {
+            "project_id": "uploaded",
+            "config": {"planner_name": "chunked_gp", "controller_mode": "bo_only", "batch_size": 2, "planner_use_descriptors": True},
+            "design_csv": self.design_csv,
+            "descriptor_tables": [
+                {"variable": "Catalyst", "value_column": "name", "csv": _as_csv(_CATALYST_TABLE)},
+                {"variable": "Solvent", "value_column": "solvent", "rows": _SOLVENT_TABLE},
+                {"variable": "Base", "value_column": "base", "csv": _as_csv(_BASE_TABLE)},
+            ],
+            "observations_csv": _as_csv(_UPLOAD_OBSERVATIONS),
+            "evidence_jsonl": "\n".join(json.dumps(card) for card in _UPLOAD_CARDS),
+        }
+        payload.update(overrides)
+        return payload
+
+    def _leftovers(self):
+        return sorted(path.name for path in self.root.iterdir()) if self.root.exists() else []
+
+    def test_whole_project_upload(self):
+        response = self.client.post("/api/projects", json=self._payload())
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["handle"], "uploaded")
+        self.assertTrue(body["check"]["ok"])
+        self.assertEqual(body["observation_count"], 4)
+        self.assertEqual(body["evidence_card_count"], 2)
+        self.assertEqual(body["observations_import"]["imported_count"], 4)
+        self.assertEqual([report["variable"] for report in body["descriptor_tables"]], ["Catalyst", "Solvent", "Base"])
+        self.assertEqual(self._leftovers(), ["uploaded"])
+        self.assertEqual(self.client.get("/api/projects/uploaded/evidence").json()["count"], 2)
+        batch = self.client.post("/api/projects/uploaded/ask", json={})
+        self.assertEqual(batch.status_code, 200, batch.text)
+        self.assertTrue(batch.json()["planner_use_descriptors"])
+
+    def test_any_failure_leaves_nothing_behind(self):
+        bad_cases = {
+            "descriptor table": dict(
+                descriptor_tables=[{"variable": "Catalyst", "value_column": "name", "rows": _CATALYST_TABLE[:2]}]
+            ),
+            "observation": dict(
+                observations_csv=_as_csv([dict(_UPLOAD_OBSERVATIONS[0], Catalyst="cat_z")])
+            ),
+            "evidence": dict(
+                evidence_jsonl='{"card_id": "c1", "summary": "x", "mapping_status": "same_redox_manifold"}'
+            ),
+            "settings": dict(config={"planner_name": "atlas", "acquisition_function": "ei_ucb", "controller_mode": "bo_only"}),
+            "descriptors requested but missing": dict(descriptor_tables=[]),
+        }
+        for name, overrides in bad_cases.items():
+            with self.subTest(case=name):
+                response = self.client.post("/api/projects", json=self._payload(**overrides))
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(self._leftovers(), [])
+        detail = self.client.post("/api/projects", json=self._payload(**bad_cases["descriptor table"])).json()["detail"]
+        self.assertEqual(detail["report"]["table_index"], 1)
+        detail = self.client.post("/api/projects", json=self._payload(**bad_cases["evidence"])).json()["detail"]
+        self.assertIn("same_redox_manifold", " ".join(detail["problems"]))
+        detail = self.client.post(
+            "/api/projects", json=self._payload(**bad_cases["descriptors requested but missing"])
+        ).json()["detail"]
+        self.assertIn("no complete numeric descriptors", str(detail))
+
+    def test_csv_evidence_file_becomes_jsonl(self):
+        payload = self._payload(evidence_jsonl=None, evidence_csv=_as_csv(
+            [dict(card, variable_scope=";".join(card.get("variable_scope", []))) for card in _UPLOAD_CARDS]
+        ))
+        payload["config"] = dict(payload["config"], evidence_file="cards.csv")
+        response = self.client.post("/api/projects", json=payload)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["project"]["evidence_file"], "evidence_cards.jsonl")
+        self.assertTrue((self.root / "uploaded" / "evidence_cards.jsonl").exists())
+
+    def test_size_limit(self):
+        from unittest import mock
+
+        from chem_agent_bo.lab import service as lab_service
+
+        with mock.patch.object(lab_service, "MAX_UPLOAD_PART_BYTES", 100):
+            response = self.client.post("/api/projects", json=self._payload())
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("larger than", response.json()["detail"])
+        self.assertEqual(self._leftovers(), [])
+
+    def test_overwrite_keeps_a_backup_and_registered_handles_are_refused(self):
+        minimal = {"project_id": "uploaded", "config": {"controller_mode": "bo_only"}, "design_csv": self.design_csv}
+        self.assertEqual(self.client.post("/api/projects", json=minimal).status_code, 200)
+        self.assertEqual(self.client.post("/api/projects", json=minimal).status_code, 400)
+        replaced = self.client.post("/api/projects", json=dict(minimal, overwrite=True))
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        self.assertTrue(Path(replaced.json()["replaced_backup_path"]).is_dir())
+
+        outside = Path(self._tmp.name) / "outside" / "lab"
+        _create_small_project(LabBOService(), str(outside))
+        ProjectRegistry(self.root).add("lab", outside)
+        refused = self.client.post("/api/projects", json=dict(minimal, project_id="lab"))
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("registered project", refused.json()["detail"])
+
+
 if __name__ == "__main__":
     unittest.main()
