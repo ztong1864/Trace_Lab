@@ -15,7 +15,7 @@ from chem_agent_bo.lab.evidence import (
     EvidenceStore,
 )
 from chem_agent_bo.lab.project import LabProject, ProjectConfig
-from chem_agent_bo.lab.service import LabBOService
+from chem_agent_bo.lab.service import LabBOService, ProjectBusyError
 
 
 def create_app(projects_root: str | Path):
@@ -95,6 +95,20 @@ def create_app(projects_root: str | Path):
                 agent_config_path=payload.get("agent_config_path") or payload.get("agent_config"),
                 planner_use_descriptors=payload.get("planner_use_descriptors"),
             )
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.patch("/api/projects/{project_id}/config")
+    def update_config(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Change editable project.yaml settings; observations and batches are untouched."""
+        try:
+            return service.update_project_config(project_id, dict(payload or {}))
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

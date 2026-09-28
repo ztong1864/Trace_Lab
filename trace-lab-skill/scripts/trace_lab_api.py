@@ -98,6 +98,23 @@ def main() -> int:
     create.add_argument("--batch-size", type=int, default=6)
     create.add_argument("--overwrite", action="store_true")
 
+    config = sub.add_parser("config", help="Show or change a project's settings (project.yaml).")
+    subparsers.append(config)
+    config.add_argument("project_id")
+    config.add_argument(
+        "--set",
+        dest="settings",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Setting to change; repeatable. Dotted keys set planner options, e.g. "
+            "planner_options.chunked_gp.min_changed_variables=3. Values are read as JSON "
+            "when possible (3, true, null removes an option), otherwise as text."
+        ),
+    )
+    config.add_argument("--json", dest="settings_json", help="JSON object of settings to change.")
+
     for subparser in subparsers:
         subparser.add_argument("--pretty", action="store_true", help=argparse.SUPPRESS)
         subparser.add_argument(
@@ -197,7 +214,35 @@ def dispatch(args: argparse.Namespace, base_url: str) -> Any:
                 "overwrite": bool(args.overwrite),
             },
         )
+    if command == "config":
+        updates = parse_config_settings(args.settings, args.settings_json)
+        if not updates:
+            return request_json(base_url, "GET", f"/api/projects/{q(args.project_id)}").get("project", {})
+        return request_json(base_url, "PATCH", f"/api/projects/{q(args.project_id)}/config", updates)
     raise ValueError(f"Unsupported command: {command}")
+
+
+def parse_config_settings(settings: list[str], settings_json: str | None) -> dict[str, Any]:
+    """Build a settings change from --json and repeatable --set KEY=VALUE (dotted keys nest)."""
+    updates: dict[str, Any] = json.loads(settings_json) if settings_json else {}
+    if not isinstance(updates, dict):
+        raise ValueError("--json must be a JSON object.")
+    for item in settings:
+        key, sep, raw = item.partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"--set expects KEY=VALUE, got `{item}`.")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            value = raw
+        parts = [part.strip() for part in key.split(".")]
+        target = updates
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+            if not isinstance(target, dict):
+                raise ValueError(f"--set `{key}` conflicts with another setting.")
+        target[parts[-1]] = value
+    return updates
 
 
 def ask(base_url: str, args: argparse.Namespace) -> Any:

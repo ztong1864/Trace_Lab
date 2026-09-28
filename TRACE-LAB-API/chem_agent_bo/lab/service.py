@@ -6,7 +6,7 @@ import csv
 import os
 import shutil
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,8 +14,8 @@ from typing import Any
 from olympus.campaigns import Campaign, ParameterSpace
 from olympus.objects import ParameterContinuous, ParameterVector
 
-from chem_agent_bo.bo.base import ExclusionConstraint
-from chem_agent_bo.bo.registry import build_planner
+from chem_agent_bo.bo.base import ExclusionConstraint, normalize_acquisition_type
+from chem_agent_bo.bo.registry import build_planner, supported_acquisitions, validate_planner_options
 from chem_agent_bo.config import load_agentic_bo_config
 from chem_agent_bo.config.schema import AgenticBOConfig
 from chem_agent_bo.lab.design_space import DesignSpace
@@ -44,6 +44,28 @@ LAB_EVIDENCE_TARGET_NODES = (
     "reflection_action",
     "lab_batch_composition",
 )
+
+# Settings that update_project_config may change. project_id, objective_name and
+# goal are deliberately excluded: existing observations depend on them.
+EDITABLE_CONFIG_FIELDS = (
+    "reaction_name",
+    "reaction_scope",
+    "planner_name",
+    "acquisition_function",
+    "planner_options",
+    "controller_mode",
+    "agent_config_path",
+    "batch_size",
+    "seed",
+    "planner_use_descriptors",
+    "allow_random_fallback",
+)
+LOCKED_CONFIG_FIELDS = ("project_id", "objective_name", "goal")
+
+
+class ProjectBusyError(RuntimeError):
+    """An ask is already running for this project."""
+
 
 # One lock per project folder (per process): two overlapping asks on the same
 # project would compute the same next round id and overwrite each other's batch.
@@ -158,7 +180,7 @@ class LabBOService:
         project = LabProject(self.project_path(project_id_or_dir))
         lock = _project_ask_lock(project.project_dir)
         if not lock.acquire(blocking=False):
-            raise RuntimeError(
+            raise ProjectBusyError(
                 f"An ask is already running for project `{project.project_dir.name}`; "
                 "wait for it to finish before requesting another batch."
             )
@@ -264,6 +286,9 @@ class LabBOService:
 
         planner_error = ""
         requested_planner_name = effective_planner_name
+        # Invalid options (e.g. a hand-edited project.yaml) fail the ask here with a
+        # clear error instead of falling back to random candidates.
+        planner_options = validate_planner_options(config.planner_options).get(effective_planner_name, {})
         third_party_log_path = project.project_dir / "logs" / "third_party.log"
         with capture_third_party_output(
             enabled=True,
@@ -278,6 +303,7 @@ class LabBOService:
                 known_constraints=constraints,
                 use_descriptors=effective_planner_descriptors,
                 acquisition_type=config.acquisition_function,
+                planner_options=planner_options,
             )
         try:
             with capture_third_party_output(
@@ -448,6 +474,68 @@ class LabBOService:
             ),
             "planner_warnings": _planner_warnings(planner.planner_diagnostics()),
         }
+
+    def update_project_config(
+        self,
+        project_id_or_dir: str | Path,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Change editable settings in project.yaml.
+
+        Observations, the design space and recommendation batches are never touched.
+        The previous project.yaml is backed up to `_backups/`, and the change is
+        refused while an ask is running on the project. `planner_options` is merged
+        into the current value; `null` removes a planner or option.
+        """
+        if not isinstance(updates, dict) or not updates:
+            raise ValueError("Send at least one setting to change.")
+        locked = sorted(set(updates) & set(LOCKED_CONFIG_FIELDS))
+        if locked:
+            raise ValueError(
+                f"{', '.join(locked)} can't be changed: the project's observations depend on "
+                "them. Create a new project instead."
+            )
+        unknown = sorted(set(updates) - set(EDITABLE_CONFIG_FIELDS))
+        if unknown:
+            raise ValueError(
+                f"Unknown or non-editable settings: {', '.join(unknown)}. "
+                f"Editable settings: {', '.join(EDITABLE_CONFIG_FIELDS)}."
+            )
+        project = LabProject(self.project_path(project_id_or_dir))
+        lock = _project_ask_lock(project.project_dir)
+        if not lock.acquire(blocking=False):
+            raise ProjectBusyError(
+                f"An ask is running for project `{project.project_dir.name}`; "
+                "change its settings after the ask finishes."
+            )
+        try:
+            current = project.load_config()
+            values = _parse_config_updates(updates, current=current)
+            updated = replace(current, **values).normalized()
+            _validate_project_config(updated, project_dir=project.project_dir)
+            changed = {
+                name: {"old": getattr(current, name), "new": getattr(updated, name)}
+                for name in values
+                if getattr(current, name) != getattr(updated, name)
+            }
+            backup_path = ""
+            if changed:
+                backup_dir = _unique_backup_dir(
+                    project.project_dir.parent
+                    / "_backups"
+                    / f"{current.project_id}_config_{_timestamp_for_path()}"
+                )
+                backup_dir.mkdir(parents=True)
+                shutil.copy2(project.config_path, backup_dir / "project.yaml")
+                backup_path = str(backup_dir / "project.yaml")
+                project.write_config(updated)
+            return {
+                "project": asdict(updated if changed else current),
+                "changed": changed,
+                "backup_path": backup_path,
+            }
+        finally:
+            lock.release()
 
     def import_observations(
         self,
@@ -1087,6 +1175,85 @@ def _format_numeric_with_unit(value: float | None, unit: str = "") -> str:
     raw = _format_float(float(value))
     unit_text = _clean(unit)
     return f"{raw} {unit_text}" if unit_text else raw
+
+
+def _parse_config_updates(updates: dict[str, Any], *, current: ProjectConfig) -> dict[str, Any]:
+    """Check raw setting values strictly, before normalization could silently coerce them."""
+    values: dict[str, Any] = {}
+    for name, value in updates.items():
+        if name in {"batch_size", "seed"}:
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer; got {value!r}.")
+            if name == "batch_size" and value < 1:
+                raise ValueError("batch_size must be at least 1.")
+            values[name] = value
+        elif name in {"planner_use_descriptors", "allow_random_fallback"}:
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be true or false; got {value!r}.")
+            values[name] = value
+        elif name == "planner_options":
+            values[name] = validate_planner_options(_merge_planner_options(current.planner_options, value))
+        elif name == "controller_mode":
+            mode = str(value or "").strip().lower()
+            if mode not in {"agentic", "bo_only"}:
+                raise ValueError(f"controller_mode must be `agentic` or `bo_only`; got {value!r}.")
+            values[name] = mode
+        else:
+            if not isinstance(value, str) or (name != "reaction_scope" and not value.strip()):
+                raise ValueError(f"{name} must be a non-empty string; got {value!r}.")
+            values[name] = value.strip()
+    return values
+
+
+def _merge_planner_options(current: Any, update: Any) -> Any:
+    """Merge a partial planner_options change into the current value; null removes an entry."""
+    if update is None:
+        return {}
+    if not isinstance(update, dict):
+        return update  # validation reports the type error
+    merged: dict[str, Any] = {
+        str(name).strip().lower(): dict(options)
+        for name, options in dict(current or {}).items()
+        if isinstance(options, dict)
+    }
+    for planner, options in update.items():
+        name = str(planner).strip().lower()
+        if options is None:
+            merged.pop(name, None)
+            continue
+        if not isinstance(options, dict):
+            merged[name] = options  # validation reports the type error
+            continue
+        target = merged.setdefault(name, {})
+        for key, value in options.items():
+            if value is None:
+                target.pop(key, None)
+            else:
+                target[key] = value
+        if not target:
+            merged.pop(name, None)
+    return merged
+
+
+def _validate_project_config(config: ProjectConfig, *, project_dir: Path) -> None:
+    """Check that a whole project config can run: planner, acquisition, options, agent config."""
+    if config.planner_name not in LAB_SUPPORTED_PLANNERS:
+        raise ValueError(
+            f"planner_name must be one of {sorted(LAB_SUPPORTED_PLANNERS)}; got `{config.planner_name}`."
+        )
+    supported = supported_acquisitions(config.planner_name)
+    if supported is not None:
+        normalize_acquisition_type(
+            config.acquisition_function,
+            supported=supported,
+            planner_name=config.planner_name,
+        )
+    validate_planner_options(config.planner_options)
+    if config.controller_mode == "agentic":
+        try:
+            _resolve_agent_config_path(config.agent_config_path, project_dir=project_dir)
+        except FileNotFoundError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 def _load_agentic_config(path: str | Path, *, project_dir: Path) -> AgenticBOConfig:

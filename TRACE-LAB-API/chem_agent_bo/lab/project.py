@@ -28,6 +28,10 @@ class ProjectConfig:
     # When the planner fails, either fall back to random candidates (flagged with
     # a warning) or, if False, fail the ask without writing a batch.
     allow_random_fallback: bool = True
+    # Per-planner settings, e.g. {"chunked_gp": {"min_changed_variables": 3,
+    # "max_scan_size": 50000000, "finalist_count": 2000}}. Only the entry for the
+    # planner in use applies; it is validated when a batch is requested.
+    planner_options: dict[str, Any] = field(default_factory=dict)
     seed: int = 7
     reaction_scope: str = ""
     evidence_file: str = "evidence_cards.jsonl"
@@ -50,7 +54,8 @@ class ProjectConfig:
             planner_name=str(self.planner_name or "atlas").strip().lower(),
             acquisition_function=str(self.acquisition_function or "ei").strip().lower(),
             allow_random_fallback=_parse_bool(self.allow_random_fallback, default=True),
-            seed=int(self.seed or 7),
+            planner_options=dict(self.planner_options or {}),
+            seed=7 if self.seed in (None, "") else int(self.seed),
             reaction_scope=str(self.reaction_scope or ""),
             evidence_file=str(self.evidence_file or "evidence_cards.jsonl"),
             controller_mode=(
@@ -201,8 +206,22 @@ class LabProject:
         overwrite: bool = False,
     ) -> "LabProject":
         project = cls(project_dir)
-        if project.project_dir.exists() and not overwrite and project.config_path.exists():
-            raise FileExistsError(f"Lab project already exists: {project.project_dir}")
+        if project.project_dir.exists() and project.config_path.exists():
+            if not overwrite:
+                raise FileExistsError(f"Lab project already exists: {project.project_dir}")
+            # Overwriting rewrites the design space and empties observations.csv, so
+            # never do it to a project that already holds lab data.
+            observation_count = (
+                len(project.load_observations().rows) if project.observations_path.exists() else 0
+            )
+            batch_count = len(list(project.project_dir.glob("recommendations_round_*.json")))
+            if observation_count or batch_count:
+                raise FileExistsError(
+                    f"Refusing to overwrite `{project.project_dir.name}`: it has "
+                    f"{observation_count} observation(s) and {batch_count} recommendation batch(es) "
+                    "that overwriting would discard. Change settings with "
+                    "PATCH /api/projects/{project_id}/config, or reset the project first."
+                )
         project.project_dir.mkdir(parents=True, exist_ok=True)
         normalized = config.normalized()
         project.write_config(normalized)

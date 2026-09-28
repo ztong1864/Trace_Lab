@@ -672,6 +672,141 @@ class ReflectionErrorTests(unittest.TestCase):
         self.assertEqual(len(told["reflection_errors"]), 2)
 
 
+class ProjectConfigApiTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:  # pragma: no cover
+            self.skipTest("FastAPI test client is not installed.")
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.service = LabBOService(projects_root=self.root)
+        self.project = _create_small_project(self.service, "cfg", planner_name="random", batch_size=2)
+        self.service.ask("cfg")
+        self.client = TestClient(create_app(self.root))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _patch(self, payload):
+        return self.client.patch("/api/projects/cfg/config", json=payload)
+
+    def test_changes_settings_backs_up_and_keeps_project_data(self):
+        design_before = self.project.design_space_path.read_bytes()
+        observations_before = self.project.observations_path.read_bytes()
+        batches_before = [batch.to_dict() for batch in self.project.load_batches()]
+        options = {"chunked_gp": {"min_changed_variables": 1, "finalist_count": 50}}
+
+        response = self._patch(
+            {"planner_name": "chunked_gp", "acquisition_function": "ucb", "planner_options": options}
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(set(body["changed"]), {"planner_name", "acquisition_function", "planner_options"})
+        config = self.project.load_config()
+        self.assertEqual((config.planner_name, config.acquisition_function), ("chunked_gp", "ucb"))
+        self.assertEqual(config.planner_options, options)
+        self.assertIn("planner_name: random", Path(body["backup_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(self.project.design_space_path.read_bytes(), design_before)
+        self.assertEqual(self.project.observations_path.read_bytes(), observations_before)
+        self.assertEqual([batch.to_dict() for batch in self.project.load_batches()], batches_before)
+
+    def test_unchanged_values_write_nothing(self):
+        response = self._patch({"batch_size": 2})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["changed"], {})
+        self.assertFalse((self.root / "_backups").exists())
+
+    def test_planner_options_reach_chunked_gp(self):
+        self._patch(
+            {
+                "planner_name": "chunked_gp",
+                "planner_options": {"chunked_gp": {"min_changed_variables": 1, "max_scan_size": 5}},
+            }
+        )
+        batch = self.service.ask("cfg")
+        trace = json.loads(self.project.trace_path(batch["round_id"]).read_text(encoding="utf-8").splitlines()[0])
+        diagnostics = trace["planner_diagnostics"]
+        self.assertEqual(diagnostics["min_changed_variables"], 1)
+        self.assertEqual(diagnostics["scan_mode"], "subsample")  # 19 legal combinations > max_scan_size 5
+
+    def test_planner_options_merge_and_null_removes(self):
+        self._patch({"planner_options": {"chunked_gp": {"min_changed_variables": 3, "finalist_count": 50}}})
+        self._patch({"planner_options": {"chunked_gp": {"finalist_count": None, "max_scan_size": 1000}}})
+        self.assertEqual(
+            self.project.load_config().planner_options,
+            {"chunked_gp": {"min_changed_variables": 3, "max_scan_size": 1000}},
+        )
+        self._patch({"planner_options": {"chunked_gp": None}})
+        self.assertEqual(self.project.load_config().planner_options, {})
+
+    def test_invalid_changes_are_rejected_without_writing(self):
+        before = self.project.config_path.read_bytes()
+        cases = {
+            "locked field": ({"objective_name": "ee"}, "can't be changed"),
+            "unknown field": ({"colour": "blue"}, "Unknown or non-editable"),
+            "acquisition for planner": (
+                {"planner_name": "atlas", "acquisition_function": "ei_ucb"},
+                "does not support acquisition function `ei_ucb`",
+            ),
+            "mode typo": ({"controller_mode": "bo-only"}, "controller_mode must be"),
+            "option value": ({"planner_options": {"chunked_gp": {"min_changed_variables": 0}}}, "positive integer"),
+            "option name": ({"planner_options": {"chunked_gp": {"min_changed": 2}}}, "Unknown option"),
+            "planner without options": ({"planner_options": {"atlas": {"x": 1}}}, "no configurable options"),
+            "batch size type": ({"batch_size": "5"}, "must be an integer"),
+            "missing agent config": (
+                {"controller_mode": "agentic", "agent_config_path": "missing.yaml"},
+                "not found",
+            ),
+            "nothing to change": ({}, "at least one setting"),
+        }
+        for label, (payload, message) in cases.items():
+            with self.subTest(label):
+                response = self._patch(payload)
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn(message, response.json()["detail"])
+        self.assertEqual(self.project.config_path.read_bytes(), before)
+        self.assertFalse((self.root / "_backups").exists())
+
+    def test_changes_and_asks_are_refused_while_an_ask_runs(self):
+        with ConcurrentAskTests._slow_planners({"slow_ask": 0.8}):
+            running = threading.Thread(target=self.service.ask, args=("cfg",), name="slow_ask")
+            running.start()
+            time.sleep(0.2)
+            config_response = self._patch({"batch_size": 3})
+            ask_response = self.client.post("/api/projects/cfg/ask", json={})
+            running.join()
+        self.assertEqual(config_response.status_code, 409, config_response.text)
+        self.assertIn("ask is running", config_response.json()["detail"])
+        self.assertEqual(ask_response.status_code, 409, ask_response.text)
+        self.assertEqual(self._patch({"batch_size": 3}).status_code, 200)
+
+    def test_overwrite_refuses_a_project_with_data(self):
+        payload = {
+            "project_id": "cfg",
+            "config": {"project_id": "cfg"},
+            "design_records": _small_design_space().to_long_records(),
+            "overwrite": True,
+        }
+        response = self.client.post("/api/projects", json=payload)
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("Refusing to overwrite", response.json()["detail"])
+        self.assertEqual(len(self.project.load_observations().rows), 6)
+
+        _create_small_project(self.service, "fresh", observation_count=0)
+        fresh = dict(payload, project_id="fresh", config={"project_id": "fresh"})
+        self.assertEqual(self.client.post("/api/projects", json=fresh).status_code, 200)
+
+    def test_invalid_hand_edited_options_fail_the_ask(self):
+        config = self.project.load_config()
+        config.planner_name = "chunked_gp"
+        config.planner_options = {"chunked_gp": {"finalist_count": 0}}
+        self.project.write_config(config)
+        with self.assertRaisesRegex(ValueError, "positive integer"):
+            self.service.ask("cfg")
+
+
 class _SlowPrintingPlanner:
     """Prints steadily while it works (as Atlas does), then returns random candidates."""
 
