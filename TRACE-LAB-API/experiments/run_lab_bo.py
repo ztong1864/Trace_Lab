@@ -18,6 +18,7 @@ if VENDOR_DIR.exists() and str(VENDOR_DIR) not in sys.path:
     sys.path.append(str(VENDOR_DIR))
 
 from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
+from chem_agent_bo.lab.evidence import EvidenceImportError
 from chem_agent_bo.lab.project import LabProject, ProjectConfig
 from chem_agent_bo.lab.registry import default_handle
 from chem_agent_bo.lab.service import LabBOService, ProjectCheckError, read_results_csv
@@ -111,6 +112,14 @@ def parse_args() -> argparse.Namespace:
         help="Match a design option to a differently spelled table row; repeatable.",
     )
     descriptor_parser.add_argument("--replace", action="store_true", help="Drop the variable's old descriptors first.")
+
+    evidence_parser = subparsers.add_parser(
+        "import-evidence",
+        help="Add or replace evidence cards from a .jsonl or .csv file (validated strictly, old file backed up).",
+    )
+    evidence_parser.add_argument("--project-dir", required=True)
+    evidence_parser.add_argument("--file", required=True, help="Evidence cards as .jsonl or .csv.")
+    evidence_parser.add_argument("--mode", choices=("append", "replace"), default="append")
     return parser.parse_args()
 
 
@@ -234,6 +243,22 @@ def main() -> None:
             )
         except DescriptorTableError as exc:
             _print_json({"changed": False, "error": str(exc), "report": exc.report})
+            raise SystemExit(1) from exc
+        return
+    if args.command == "import-evidence":
+        text = Path(args.file).read_text(encoding="utf-8-sig")
+        is_csv = Path(args.file).suffix.lower() == ".csv"
+        try:
+            _print_json(
+                service.import_evidence(
+                    args.project_dir,
+                    jsonl=None if is_csv else text,
+                    csv_text=text if is_csv else None,
+                    mode=args.mode,
+                )
+            )
+        except EvidenceImportError as exc:
+            _print_json({"imported": False, "error": str(exc), "problems": exc.problems})
             raise SystemExit(1) from exc
         return
     if args.command == "unregister":

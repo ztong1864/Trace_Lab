@@ -138,6 +138,26 @@ def create_app(projects_root: str | Path):
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/projects/{project_id}/evidence/import")
+    def import_evidence(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Add or replace evidence cards (cards, JSONL or CSV), validated strictly."""
+        try:
+            return service.import_evidence(
+                project_id,
+                cards=payload.get("cards"),
+                jsonl=payload.get("jsonl"),
+                csv_text=payload.get("csv"),
+                mode=str(payload.get("mode") or "append"),
+            )
+        except EvidenceImportError as exc:
+            raise HTTPException(status_code=400, detail={"message": str(exc), "problems": exc.problems}) from exc
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.delete("/api/projects/{project_id}/registration")
     def unregister_project(project_id: str) -> dict[str, Any]:
         """Forget a registered project; its files are not touched."""
@@ -295,6 +315,8 @@ def create_app(projects_root: str | Path):
                 source=str(payload.get("source") or "historical"),
                 allow_duplicates=bool(payload.get("allow_duplicates", False)),
             )
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

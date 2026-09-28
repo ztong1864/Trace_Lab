@@ -672,5 +672,115 @@ class UploadTests(unittest.TestCase):
         self.assertIn("registered project", refused.json()["detail"])
 
 
+class EvidenceImportTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "root"
+        self.project = _create_small_project(LabBOService(projects_root=self.root), "ev")
+        self.client = TestClient(create_app(self.root))
+
+    def _import(self, **payload):
+        return self.client.post("/api/projects/ev/evidence/import", json=payload)
+
+    def _count(self):
+        return self.client.get("/api/projects/ev/evidence").json()["count"]
+
+    def test_append_then_replace_with_backups(self):
+        import json
+
+        first = self._import(jsonl="\n".join(json.dumps(card) for card in _UPLOAD_CARDS))
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual((first.json()["imported_count"], first.json()["card_count"]), (2, 2))
+        before = self.project.evidence_path.read_text(encoding="utf-8")
+
+        clash = self._import(cards=[_UPLOAD_CARDS[0]])
+        self.assertEqual(clash.status_code, 400)
+        self.assertIn("`c1` already exists", " ".join(clash.json()["detail"]["problems"]))
+        self.assertEqual(self.project.evidence_path.read_text(encoding="utf-8"), before)
+
+        added = self._import(cards=[dict(_UPLOAD_CARDS[0], card_id="c3")])
+        self.assertEqual(added.json()["card_count"], 3)
+        replaced = self._import(cards=[dict(_UPLOAD_CARDS[1], card_id="only")], mode="replace")
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        self.assertEqual(self._count(), 1)
+        backup = Path(replaced.json()["backup_dir"]) / "evidence_cards.jsonl"
+        self.assertEqual(len(backup.read_text(encoding="utf-8").splitlines()), 3)
+
+    def test_strict_validation_reports_every_problem(self):
+        cards = [
+            {"card_id": "a", "summary": "ok", "mapping_status": "direct"},
+            {"card_id": "a", "summary": "again"},
+            {"card_id": "b", "summary": ""},
+            {"summary": "no id"},
+            {"card_id": "c", "summary": "x", "mapping_status": "same_redox_manifold"},
+        ]
+        response = self._import(cards=cards)
+        self.assertEqual(response.status_code, 400)
+        problems = " | ".join(response.json()["detail"]["problems"])
+        for expected in ("repeats", "empty summary", "missing card_id", "same_redox_manifold"):
+            self.assertIn(expected, problems)
+        self.assertEqual(self._count(), 0)
+        self.assertEqual(self._import(cards=cards[:1], mode="merge").status_code, 400)
+        self.assertEqual(self._import().status_code, 400)
+
+    def test_csv_evidence_file_is_converted(self):
+        from chem_agent_bo.lab.project import LabProject
+
+        config = self.project.load_config()
+        config.evidence_file = "cards.csv"
+        self.project.write_config(config)
+        (self.project.project_dir / "cards.csv").write_text(
+            "card_id,source,summary,mapping_status\nold,paper,Old card.,background\n", encoding="utf-8"
+        )
+        result = self._import(csv=_as_csv([dict(card, variable_scope=";".join(card.get("variable_scope", []))) for card in _UPLOAD_CARDS]))
+        self.assertEqual(result.status_code, 200, result.text)
+        body = result.json()
+        self.assertEqual((body["converted_from"], body["evidence_file"], body["card_count"]), ("cards.csv", "evidence_cards.jsonl", 3))
+        self.assertEqual(LabProject(self.project.project_dir).load_config().evidence_file, "evidence_cards.jsonl")
+        self.assertTrue((Path(body["backup_dir"]) / "cards.csv").exists())
+        self.assertTrue((Path(body["backup_dir"]) / "project.yaml").exists())
+        self.assertEqual(self._count(), 3)
+
+    def test_writers_get_409_while_an_ask_runs(self):
+        from chem_agent_bo.lab.service import _project_ask_lock
+
+        lock = _project_ask_lock(self.project.project_dir)
+        lock.acquire()
+        try:
+            responses = {
+                "observations": self.client.post(
+                    "/api/projects/ev/observations/import",
+                    json={"rows": [dict(_UPLOAD_OBSERVATIONS[0], Catalyst="cat_b", Solvent="thf")]},
+                ),
+                "evidence": self._import(cards=[_UPLOAD_CARDS[0]]),
+                "descriptors": self.client.post(
+                    "/api/projects/ev/descriptors",
+                    json={"variable": "Catalyst", "value_column": "name", "rows": _CATALYST_TABLE},
+                ),
+                "config": self.client.patch("/api/projects/ev/config", json={"batch_size": 3}),
+            }
+        finally:
+            lock.release()
+        self.assertEqual({name: response.status_code for name, response in responses.items()}, dict.fromkeys(responses, 409))
+        self.assertEqual(self._count(), 0)
+
+    def test_cli_import_evidence(self):
+        import contextlib
+        import io
+        import json
+        import sys
+        from unittest import mock
+
+        cli = _load_cli()
+        path = Path(self._tmp.name) / "cards.jsonl"
+        path.write_text("\n".join(json.dumps(card) for card in _UPLOAD_CARDS), encoding="utf-8")
+        argv = ["run_lab_bo.py", "import-evidence", "--project-dir", str(self.project.project_dir), "--file", str(path)]
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+            cli.main()
+        self.assertEqual(json.loads(out.getvalue())["card_count"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

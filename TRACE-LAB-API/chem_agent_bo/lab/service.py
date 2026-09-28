@@ -8,10 +8,11 @@ import os
 import shutil
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 from olympus.campaigns import Campaign, ParameterSpace
@@ -91,6 +92,20 @@ def _project_ask_lock(project_dir: Path) -> threading.Lock:
     key = os.path.normcase(str(Path(project_dir).resolve()))
     with _ASK_LOCKS_GUARD:
         return _ASK_LOCKS.setdefault(key, threading.Lock())
+
+
+@contextmanager
+def _project_lock_or_busy(project_dir: Path, action: str) -> Iterator[None]:
+    """Hold the project's ask lock for a write, or raise ProjectBusyError if an ask runs."""
+    lock = _project_ask_lock(project_dir)
+    if not lock.acquire(blocking=False):
+        raise ProjectBusyError(
+            f"An ask is running for project `{Path(project_dir).name}`; {action} after it finishes."
+        )
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 class LabBOService:
@@ -350,6 +365,66 @@ class LabBOService:
             "report": report,
             "backup_path": str(backup_dir / "design_space.csv"),
             "descriptor_eligibility": updated.planner_descriptor_eligibility(),
+        }
+
+    def import_evidence(
+        self,
+        project_id_or_dir: str | Path,
+        *,
+        cards: list[dict[str, Any]] | None = None,
+        jsonl: str | None = None,
+        csv_text: str | None = None,
+        mode: str = "append",
+    ) -> dict[str, Any]:
+        """Add (`append`) or swap in (`replace`) evidence cards, validated strictly.
+
+        The old evidence file is backed up. A project whose evidence file is a CSV is
+        converted to `evidence_cards.jsonl` (project.yaml is backed up too).
+        """
+        from chem_agent_bo.lab.evidence import EvidenceImportError, parse_evidence_upload
+
+        mode = str(mode or "append").strip().lower()
+        if mode not in {"append", "replace"}:
+            raise ValueError(f"mode must be `append` or `replace`; got `{mode}`.")
+        for text, name in ((jsonl, "evidence JSONL"), (csv_text, "evidence CSV")):
+            _check_upload_size(text, name)
+        new_cards = parse_evidence_upload(cards=cards, jsonl=jsonl, csv_text=csv_text)
+        project = LabProject(self.project_path(project_id_or_dir))
+        if not project.config_path.exists():
+            raise FileNotFoundError(f"No project `{project_id_or_dir}`.")
+        with _project_lock_or_busy(project.project_dir, "import evidence"):
+            config = project.load_config()
+            old_path = project.evidence_path
+            existing = EvidenceStore.load(old_path).cards if old_path.exists() else []
+            if mode == "append":
+                taken = {card.card_id for card in existing}
+                clashes = sorted(card.card_id for card in new_cards if card.card_id in taken)
+                if clashes:
+                    raise EvidenceImportError(
+                        f"{len(clashes)} card_id(s) already exist in the project; nothing was imported.",
+                        [f"card_id `{card_id}` already exists." for card_id in clashes],
+                    )
+            backup_dir = _unique_backup_dir(
+                project.project_dir.parent / "_backups" / f"{project.project_dir.name}_evidence_{_timestamp_for_path()}"
+            )
+            backup_dir.mkdir(parents=True)
+            if old_path.exists():
+                shutil.copy2(old_path, backup_dir / old_path.name)
+            converted_from = ""
+            if not config.evidence_file.lower().endswith(".jsonl"):
+                shutil.copy2(project.config_path, backup_dir / "project.yaml")
+                converted_from = config.evidence_file
+                project.write_config(replace(config, evidence_file="evidence_cards.jsonl"))
+            cards_out = (existing if mode == "append" else []) + new_cards
+            EvidenceStore(cards_out).write_jsonl(project.evidence_path)
+        return {
+            "handle": self.handle_for(project.project_dir),
+            "mode": mode,
+            "imported_count": len(new_cards),
+            "card_count": len(cards_out),
+            "evidence_file": project.load_config().evidence_file,
+            "converted_from": converted_from,
+            "backup_dir": str(backup_dir),
         }
 
     def unregister_project(self, handle: str) -> dict[str, Any]:
@@ -832,11 +907,27 @@ class LabBOService:
         source: str = "historical",
         allow_duplicates: bool = False,
     ) -> dict[str, Any]:
-        """Import measured lab observations that did not originate from TRACE recommendations."""
+        """Import measured lab observations that did not originate from TRACE recommendations.
 
+        Refused while an ask runs on the project, which reads the observations.
+        """
+        project_dir = self.project_path(project_id_or_dir)
+        with _project_lock_or_busy(project_dir, "import observations"):
+            return self._import_observations_unlocked(
+                project_dir, rows=rows, source=source, allow_duplicates=allow_duplicates
+            )
+
+    def _import_observations_unlocked(
+        self,
+        project_dir: Path,
+        *,
+        rows: list[dict[str, Any]],
+        source: str,
+        allow_duplicates: bool,
+    ) -> dict[str, Any]:
         if not rows:
             raise ValueError("import_observations requires at least one row.")
-        project = LabProject(self.project_path(project_id_or_dir))
+        project = LabProject(project_dir)
         config = project.load_config()
         design_space = project.load_design_space()
         observations = project.load_observations()
