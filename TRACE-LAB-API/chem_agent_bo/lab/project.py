@@ -349,6 +349,12 @@ class LabProject:
                 goal=config.goal,
             ),
             "recommendation_rounds": [batch.round_id for batch in batches],
+            "pending_recommendation_count": sum(
+                1
+                for batch in batches
+                for recommendation in batch.recommendations
+                if str(recommendation.get("status") or "pending").strip().lower() == "pending"
+            ),
         }
 
 

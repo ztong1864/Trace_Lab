@@ -26,6 +26,7 @@ from chem_agent_bo.lab.project import (
     ProjectConfig,
     RecommendationBatch,
 )
+from chem_agent_bo.lab.registry import ProjectRegistry, validate_handle
 from chem_agent_bo.runtime import ActionCapabilityPolicy, ControllerRuntime, ControllerRuntimeConfig
 from chem_agent_bo.runtime.lab_evidence import LabEvidenceProvider
 from chem_agent_bo.utils.run_io import capture_third_party_output
@@ -82,14 +83,49 @@ def _project_ask_lock(project_dir: Path) -> threading.Lock:
 class LabBOService:
     """Batch ask/tell service for wet-lab optimization."""
 
-    def __init__(self, projects_root: str | Path | None = None) -> None:
+    def __init__(self, projects_root: str | Path | None = None, *, allow_paths: bool = True) -> None:
+        """`allow_paths` lets callers pass folder paths instead of handles (CLI, scripts).
+        The web API turns it off so a URL can only name a project by its handle."""
         self.projects_root = Path(projects_root) if projects_root is not None else None
+        self.allow_paths = bool(allow_paths)
+        self.registry = ProjectRegistry(self.projects_root) if self.projects_root is not None else None
 
     def project_path(self, project_id_or_dir: str | Path) -> Path:
-        raw = Path(project_id_or_dir)
-        if raw.exists() or raw.is_absolute() or self.projects_root is None:
-            return raw
-        return self.projects_root / str(project_id_or_dir)
+        if self.allow_paths:
+            raw = Path(project_id_or_dir)
+            if raw.exists() or raw.is_absolute() or self.projects_root is None:
+                return raw
+        if self.projects_root is None:
+            raise ValueError("No projects root configured; pass a project folder path.")
+        handle = validate_handle(project_id_or_dir)
+        registered = self.registry.resolve(handle)
+        return registered if registered is not None else self.projects_root / handle
+
+    def handle_for(self, project_dir: str | Path) -> str:
+        """The handle a project folder is addressed by (registry name or root folder name)."""
+        registered = self.registry.handle_for(project_dir) if self.registry is not None else None
+        return registered or Path(project_dir).name
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        """Projects in the projects root plus registered outside projects, each with its handle."""
+        if self.projects_root is None:
+            return []
+        items: list[dict[str, Any]] = []
+        if self.projects_root.exists():
+            for path in sorted(self.projects_root.iterdir()):
+                if path.is_dir() and not path.name.startswith(("_", ".")) and (path / "project.yaml").exists():
+                    items.append(_project_listing(path.name, path, registered=False))
+        for handle, entry in sorted(self.registry.entries().items()):
+            items.append(_project_listing(handle, Path(str(entry.get("path") or "")), registered=True))
+        return items
+
+    def project_summary(self, project_id_or_dir: str | Path) -> dict[str, Any]:
+        project_dir = self.project_path(project_id_or_dir)
+        return {
+            **LabProject(project_dir).summary(),
+            "handle": self.handle_for(project_dir),
+            "project_dir": str(project_dir),
+        }
 
     def create_project(
         self,
@@ -99,6 +135,13 @@ class LabBOService:
         design_space: DesignSpace,
         overwrite: bool = False,
     ) -> LabProject:
+        if self.registry is not None and not Path(project_id_or_dir).is_absolute():
+            registered = self.registry.resolve(str(project_id_or_dir))
+            if registered is not None:
+                raise FileExistsError(
+                    f"`{project_id_or_dir}` is the handle of a registered project ({registered}); "
+                    "choose another project id."
+                )
         return LabProject.create(
             self.project_path(project_id_or_dir),
             config=config,
@@ -1438,6 +1481,16 @@ def _reflection_errors(records: list[dict[str, Any]]) -> list[dict[str, str]]:
         for record in records
         if record.get("event") == "tell_reflection_error"
     ]
+
+
+def _project_listing(handle: str, project_dir: Path, *, registered: bool) -> dict[str, Any]:
+    base = {"handle": handle, "project_dir": str(project_dir), "registered": registered}
+    if not (project_dir / "project.yaml").exists():
+        return {**base, "available": False, "error": f"No project.yaml at {project_dir}."}
+    try:
+        return {**LabProject(project_dir).summary(), **base, "available": True}
+    except Exception as exc:  # noqa: BLE001 -- one broken project must not hide the others
+        return {**base, "available": True, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _planner_warnings(planner_diagnostics: dict[str, Any] | None) -> list[str]:

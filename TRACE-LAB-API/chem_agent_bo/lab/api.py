@@ -38,24 +38,18 @@ def create_app(projects_root: str | Path):
 
     root = Path(projects_root)
     root.mkdir(parents=True, exist_ok=True)
-    service = LabBOService(projects_root=root)
+    # URLs name projects by handle only; raw folder paths are never accepted here.
+    service = LabBOService(projects_root=root, allow_paths=False)
     web_dir = Path(__file__).resolve().parent / "web"
     app = FastAPI(title="TRACE Lab API", version="0.1")
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
-        return {"ok": True, "projects_root": str(root)}
+        return {"ok": True, "projects_root": str(root), "registry_path": str(service.registry.path)}
 
     @app.get("/api/projects")
     def list_projects() -> dict[str, Any]:
-        projects = []
-        for path in sorted(root.iterdir()):
-            if path.is_dir() and (path / "project.yaml").exists():
-                try:
-                    projects.append(LabProject(path).summary())
-                except Exception as exc:  # noqa: BLE001
-                    projects.append({"project_dir": str(path), "error": str(exc)})
-        return {"projects": projects}
+        return {"projects": service.list_projects()}
 
     @app.post("/api/projects")
     def create_project(payload: dict[str, Any]) -> dict[str, Any]:
@@ -79,7 +73,7 @@ def create_app(projects_root: str | Path):
     @app.get("/api/projects/{project_id}")
     def project_summary(project_id: str) -> dict[str, Any]:
         try:
-            return LabProject(service.project_path(project_id)).summary()
+            return service.project_summary(project_id)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
