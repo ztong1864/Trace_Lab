@@ -217,9 +217,27 @@ def _check_observations(folder: Path, config: ProjectConfig, design: DesignSpace
     )
 
 
+def _told_recommendation_ids(folder: Path) -> set[str]:
+    """Recommendation ids that already have a completed / failed / skipped observation (what `tell` refuses to repeat)."""
+    path = folder / "observations.csv"
+    if not path.exists():
+        return set()
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            return {
+                str(row.get("recommendation_id") or "").strip()
+                for row in csv.DictReader(handle)
+                if str(row.get("recommendation_id") or "").strip()
+                and str(row.get("status") or "").strip().lower() in {"completed", "failed", "skipped"}
+            }
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return set()  # _check_observations reports an unreadable file
+
+
 def _check_batches(folder: Path, design: DesignSpace, report: _Report) -> None:
     numbers: list[int] = []
     pending = 0
+    told_ids = _told_recommendation_ids(folder)
     for path in sorted(folder.glob("recommendations_round_*.json")):
         match = _ROUND_FILE.match(path.name)
         if not match:
@@ -240,6 +258,14 @@ def _check_batches(folder: Path, design: DesignSpace, report: _Report) -> None:
             status = str(recommendation.get("status") or "pending").strip().lower()
             if status == "pending":
                 pending += 1
+                if rec_id in told_ids:
+                    report.error(
+                        path.name,
+                        f"{rec_id}: an observation with this recommendation id already exists (usually imported "
+                        "history that used the same round ids), so its result would be refused. Remove this "
+                        f"batch's files (recommendations_{round_id}.json/.csv, trace_{round_id}.jsonl) and ask again: "
+                        "new rounds are numbered after the imported ones.",
+                    )
             if status not in OBSERVATION_STATUSES:
                 report.error(path.name, f"{rec_id}: unknown status `{status}`.")
             candidate = recommendation.get("candidate") or {}
@@ -252,13 +278,8 @@ def _check_batches(folder: Path, design: DesignSpace, report: _Report) -> None:
                     message = f"{rec_id}: {_value_problem(exc)}"
                     # A pending recommendation outside the design space can't be told back.
                     (report.error if status == "pending" else report.warn)(path.name, message)
-    expected = list(range(1, len(numbers) + 1))
-    if sorted(numbers) != expected:
-        report.error(
-            "recommendations_round_*.json",
-            f"Round numbers {sorted(numbers)} are not 1..{len(numbers)} without gaps; "
-            "the next ask would reuse an existing round id and overwrite that batch.",
-        )
+    # Gaps in the round numbers are fine: the next round is one more than the highest number
+    # used by a batch or by imported history, so it can never reuse or overwrite one.
     report.facts.update({"recommendation_rounds": len(numbers), "pending_recommendation_count": pending})
 
 

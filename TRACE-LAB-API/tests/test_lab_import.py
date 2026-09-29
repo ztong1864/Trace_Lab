@@ -197,13 +197,13 @@ class ProjectCheckTests(unittest.TestCase):
         config.write_text(text, encoding="utf-8")
         self.assertIn("missing_agent.yaml", self._messages(self._check()))
 
-    def test_round_gap_is_an_error(self):
+    def test_a_batch_file_that_does_not_match_its_round_id_is_an_error(self):
         LabBOService().ask(str(self.folder))
         for suffix in ("json", "csv"):
             (self.folder / f"recommendations_round_001.{suffix}").rename(self.folder / f"recommendations_round_002.{suffix}")
         messages = self._messages(self._check())
-        self.assertIn("without gaps", messages)
         self.assertIn("expected `round_002`", messages)
+        self.assertNotIn("without gaps", messages, "gaps in round numbers are allowed now")
 
     def test_evidence_problems(self):
         cards = [
@@ -780,6 +780,162 @@ class EvidenceImportTests(unittest.TestCase):
         with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
             cli.main()
         self.assertEqual(json.loads(out.getvalue())["card_count"], 2)
+
+
+class RoundNumberingTests(unittest.TestCase):
+    """New rounds are numbered after every round already used, by a batch or by imported history."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = LabBOService(projects_root=Path(self._tmp.name) / "root")
+
+    def _project(self, name="hist"):
+        return _create_small_project(self.service, name, observation_count=0, planner_name="random", batch_size=2)
+
+    def _history(self, name, rounds=3, per_round=2):
+        """Rows as exported from an earlier project: round_NNN ids on told recommendations."""
+        options = [
+            ("cat_a", "dce", "k2co3"),
+            ("cat_b", "meoh", "cs2co3"),
+            ("cat_c", "thf", "et3n"),
+            ("cat_a", "thf", "cs2co3"),
+            ("cat_b", "dce", "et3n"),
+            ("cat_c", "meoh", "k2co3"),
+        ]
+        rows = []
+        for number in range(1, rounds + 1):
+            for rank in range(1, per_round + 1):
+                catalyst, solvent, base = options[((number - 1) * per_round + rank - 1) % len(options)]
+                rows.append(
+                    {
+                        "round_id": f"round_{number:03d}",
+                        "recommendation_id": f"round_{number:03d}_rec_{rank:03d}",
+                        "source": "recommendation",
+                        "stage": "lab_recommendation",
+                        "Catalyst": catalyst,
+                        "Solvent": solvent,
+                        "Base": base,
+                        "yield": str(10 * number + rank),
+                        "status": "completed",
+                    }
+                )
+        self.service.import_observations(name, rows=rows, source="recommendation", allow_duplicates=True)
+        return rows
+
+    def _ask(self, name="hist"):
+        return self.service.ask(name, batch_size=2, planner_name="random", controller_mode="bo_only")
+
+    def test_first_batch_after_imported_history_continues_the_numbering(self):
+        self._project()
+        self._history("hist", rounds=3)
+        batch = self._ask()
+        self.assertEqual(batch["round_id"], "round_004")
+        ids = [item["recommendation_id"] for item in batch["recommendations"]]
+        self.assertEqual(ids, ["round_004_rec_001", "round_004_rec_002"])
+
+    def test_results_of_a_batch_after_imported_history_are_accepted(self):
+        """The reported failure: `Recommendation round_001_rec_001 already has a completed observation`."""
+        self._project()
+        self._history("hist", rounds=3)
+        batch = self._ask()
+        results = [
+            {"recommendation_id": item["recommendation_id"], "status": "completed", "yield": str(40 + rank)}
+            for rank, item in enumerate(batch["recommendations"])
+        ]
+        told = self.service.tell("hist", results=results, reflect_results=False)
+        self.assertEqual(len(told["appended"]), 2)
+        self.assertEqual(self._ask()["round_id"], "round_005")
+
+    def test_a_project_without_history_still_starts_at_round_001(self):
+        self._project()
+        self.assertEqual(self._ask()["round_id"], "round_001")
+
+    def test_history_that_uses_only_recommendation_ids_is_also_respected(self):
+        self._project()
+        self.service.import_observations(
+            "hist",
+            rows=[
+                {
+                    "recommendation_id": "round_007_rec_001",
+                    "source": "recommendation",
+                    "Catalyst": "cat_a",
+                    "Solvent": "dce",
+                    "Base": "k2co3",
+                    "yield": "12",
+                    "status": "completed",
+                }
+            ],
+            source="recommendation",
+        )
+        self.assertEqual(self._ask()["round_id"], "round_008")
+
+    def test_a_gap_in_the_batch_files_never_makes_the_next_ask_overwrite_a_batch(self):
+        project = self._project()
+        self._ask()
+        second = self._ask()
+        self.assertEqual(second["round_id"], "round_002")
+        for suffix in ("json", "csv"):
+            (project.project_dir / f"recommendations_round_002.{suffix}").rename(
+                project.project_dir / f"recommendations_round_003.{suffix}"
+            )
+        renamed = project.project_dir / "recommendations_round_003.json"
+        renamed.write_text(renamed.read_text(encoding="utf-8").replace("round_002", "round_003"), encoding="utf-8")
+        before = renamed.read_bytes()
+        self.assertEqual(self._ask()["round_id"], "round_004")
+        self.assertEqual(renamed.read_bytes(), before, "round_003 was left untouched")
+
+    def test_a_gap_is_not_a_check_error_any_more(self):
+        project = self._project()
+        self._ask()
+        for suffix in ("json", "csv"):
+            (project.project_dir / f"recommendations_round_001.{suffix}").rename(
+                project.project_dir / f"recommendations_round_003.{suffix}"
+            )
+        path = project.project_dir / "recommendations_round_003.json"
+        path.write_text(path.read_text(encoding="utf-8").replace("round_001", "round_003"), encoding="utf-8")
+        (project.project_dir / "trace_round_001.jsonl").rename(project.project_dir / "trace_round_003.jsonl")
+        report = self.service.check_project("hist")
+        messages = " ".join(item["message"] for item in report["errors"])
+        self.assertNotIn("without gaps", messages)
+        self.assertTrue(report["ok"], messages)
+
+    def test_check_flags_a_pending_recommendation_whose_id_was_already_told(self):
+        """A project already in the broken state (batch asked before the fix) is named, not left to fail at tell."""
+        project = self._project()
+        batch = self._ask()  # round_001
+        clash = batch["recommendations"][0]["recommendation_id"]
+        self.service.import_observations(
+            "hist",
+            rows=[
+                {
+                    "round_id": "round_001",
+                    "recommendation_id": clash,
+                    "source": "recommendation",
+                    "Catalyst": "cat_a",
+                    "Solvent": "dce",
+                    "Base": "k2co3",
+                    "yield": "12",
+                    "status": "completed",
+                }
+            ],
+            source="recommendation",
+            allow_duplicates=True,
+        )
+        report = self.service.check_project("hist")
+        self.assertFalse(report["ok"])
+        messages = " ".join(item["message"] for item in report["errors"])
+        self.assertIn(clash, messages)
+        self.assertIn("already exists", messages)
+        self.assertIn("ask again", messages)
+
+    def test_the_check_is_clean_for_history_followed_by_a_new_batch(self):
+        self._project()
+        self._history("hist", rounds=3)
+        self._ask()
+        report = self.service.check_project("hist")
+        self.assertTrue(report["ok"], report["errors"])
+        self.assertEqual(report["facts"]["pending_recommendation_count"], 2)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,9 @@ from typing import Any
 import yaml
 
 from chem_agent_bo.lab.design_space import DesignSpace, _parse_bool
+
+# `round_007` or the start of `round_007_rec_003`.
+_ROUND_NUMBER = re.compile(r"^round_(\d+)(?:_|$)")
 
 
 @dataclass
@@ -286,8 +290,25 @@ class LabProject:
         self.write_config(config)
 
     def next_round_id(self) -> str:
-        existing = sorted(self.project_dir.glob("recommendations_round_*.json"))
-        return f"round_{len(existing) + 1:03d}"
+        """One more than the highest round number already used, by a batch or by imported history.
+
+        Counting the batch files is not enough: observations imported from an earlier project
+        can already carry `round_NNN` round ids and `round_NNN_rec_MMM` recommendation ids, and a
+        new batch that reused them would collide with those observations (its results would be
+        refused). Using the highest number, not the count, also means a gap can never make the
+        next ask overwrite an existing batch.
+        """
+        numbers = [
+            int(match.group(1))
+            for path in self.project_dir.glob("recommendations_round_*.json")
+            if (match := _ROUND_NUMBER.match(path.stem.removeprefix("recommendations_")))
+        ]
+        if self.observations_path.exists():
+            for row in self.load_observations().rows:
+                for key in ("round_id", "recommendation_id"):
+                    if match := _ROUND_NUMBER.match(str(row.get(key) or "").strip()):
+                        numbers.append(int(match.group(1)))
+        return f"round_{max(numbers, default=0) + 1:03d}"
 
     def recommendation_json_path(self, round_id: str) -> Path:
         return self.project_dir / f"recommendations_{round_id}.json"
