@@ -54,6 +54,8 @@ evidence-preview   看控制器实际会看到哪几张卡                      
 | `confidence` | 0–1 的数，或 `high` / `medium` / `low` |
 | `transferability_note` | **必填**。这篇论文的底物、规模、温度、条件与本项目有何不同，为什么不能直接照搬 |
 | `target_nodes` | 可省略；默认 `design_init_experiments`、`hypothesis_action` |
+| `reaction_scope` | 可省略。论文自己研究的反应，如 `iron/nitroxyl aerobic oxidative lactonization of 1,4-diols`（不要照抄项目的 `reaction_scope`）。研究者若把状态升为 `direct` / `same_start_end`，这个字段必须能和项目的 `reaction_scope` 互相包含，否则卡片永远不会被展示，`evidence-preview` 会指出 |
+| `source` | 可省略。完整引用（作者、期刊、年份、DOI）；省略时用文件名和 DOI |
 
 ## 规则
 
@@ -66,6 +68,10 @@ evidence-preview   看控制器实际会看到哪几张卡                      
 7. **和项目无关的论文，不写卡片**，在回复里说明“这篇不相关，原因是……”。不要为了凑数强写。
 8. **不要把论文里的结果表逐行抄成查表。** 一条引文里同时给出本项目多个选项的产率时会出现警告 `lookup_like`：可以保留，但 summary 应说明趋势，而不是让控制器按表挑候选。
 9. **不重复。** 项目里已有卡引用同一篇论文时会提示 `paper_already_cited`，只保留确实补充了新信息的发现。
+
+## 写完之后：卡片会不会真被展示？
+
+控制器每次 `ask` 只取得分最高的前几张卡（`knowledge_top_k`，默认 5），整次 ask 的所有节点共用这一组。得分大致是 `状态分 + 10×置信度 + 4×涉及的设计变量数 + 3×命中的节点数`，所以**只涉及 1–2 个变量的精确卡片，很难排进前 5**，项目里已有涉及 6–7 个变量的宽泛卡片时尤其如此。导入后请运行 `evidence-preview` 看新卡排第几；这是检索排序的局限，不要为了排名靠前把 `variable_scope` 写宽——那会让卡片说得比论文更多。
 
 ## 检查结果怎么读
 

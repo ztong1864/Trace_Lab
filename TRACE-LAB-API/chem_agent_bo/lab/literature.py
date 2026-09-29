@@ -14,6 +14,7 @@ only touched when reviewed cards are imported.
 
 from __future__ import annotations
 
+import csv
 import difflib
 import hashlib
 import json
@@ -24,6 +25,7 @@ import subprocess
 import tempfile
 import unicodedata
 from collections import Counter
+from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -460,10 +462,12 @@ def check_draft(
     taken_card_ids: set[str],
     existing_excerpts: list[str],
     same_paper_card_ids: list[str] | None = None,
+    reviewed: bool = False,
 ) -> dict[str, Any]:
     """Check one drafted finding against the paper. Returns the draft plus `status`, `errors`, `warnings`.
 
     status is `ok`, `rejected` (has errors) or `duplicate` (already in the project).
+    `reviewed=True` is for rows a chemist has gone through: they may set direct / same_start_end.
     What this cannot prove: that a yield belongs to the condition the summary names. The
     chemist checks that by reading the quote beside the summary in the review sheet.
     """
@@ -552,14 +556,17 @@ def check_draft(
     # Status: drafts cannot claim the paper matches the project's own reaction.
     status = str(draft.get("proposed_mapping_status") or draft.get("mapping_status") or "same_reaction_family")
     status = status.strip().lower()
-    if status in CHEMIST_ONLY_STATUSES:
+    if status in CHEMIST_ONLY_STATUSES and reviewed:
+        pass
+    elif status in CHEMIST_ONLY_STATUSES:
         found.warn(
             "status_downgraded",
             f"`{status}` needs the chemist's judgement; set to same_reaction_family for review.",
         )
         status = "same_reaction_family"
     elif status not in DRAFTABLE_STATUSES:
-        found.error("bad_status", f"mapping_status `{status}` must be one of {list(DRAFTABLE_STATUSES)}.")
+        allowed = list(DRAFTABLE_STATUSES) + (list(CHEMIST_ONLY_STATUSES) if reviewed else [])
+        found.error("bad_status", f"mapping_status `{status}` must be one of {allowed}.")
     result["mapping_status"] = status
     if scope and status != "background" and all(name in names for name in scope) and not optimized.intersection(scope):
         found.warn(
@@ -702,3 +709,225 @@ def verify_drafts(project_dir: str | Path) -> dict[str, Any]:
         "by_code": dict(by_code.most_common()),
         "records": records,
     }
+
+
+# ---------------------------------------------------------------------------
+# Review sheet: what the chemist reads, edits and accepts
+# ---------------------------------------------------------------------------
+
+SHEET_NAME = "review_sheet.csv"
+LIST_SEPARATOR = " | "
+# The chemist works left to right: decide, see the claim beside the quote, then the context.
+SHEET_COLUMNS = [
+    "decision",
+    "card_id",
+    "mapping_status",
+    "confidence",
+    "summary",
+    "supporting_excerpt",
+    "page",
+    "locator",
+    "transferability_note",
+    "variable_scope",
+    "target_nodes",
+    "reaction_scope",
+    "source",
+    "doi",
+    "checks",
+    "source_id",
+    "finding_id",
+]
+_DECISIONS = {"", "accept", "reject"}
+_REQUIRED_SHEET_COLUMNS = ("decision", "card_id", "summary", "supporting_excerpt", "source_id", "finding_id")
+
+
+class SheetError(LiteratureError):
+    """The review sheet can't be turned into cards; `problems` lists each row's issue."""
+
+    def __init__(self, message: str, problems: list[str]) -> None:
+        super().__init__(message)
+        self.problems = problems
+
+
+def _split_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value or "").split("|") if item.strip()]
+
+
+def build_sheet(project_dir: str | Path, *, force: bool = False) -> dict[str, Any]:
+    """Write review_sheet.csv from the verified drafts that passed (status ok).
+
+    A sheet where someone has already entered decisions is not overwritten unless `force`
+    (the old one is then kept next to it with a timestamp).
+    """
+    base = work_dir(project_dir)
+    verified = _read_jsonl(base / "verified.jsonl")
+    if not verified:
+        raise LiteratureError("No verified drafts; run evidence-verify first.")
+    path = base / SHEET_NAME
+    if path.exists():
+        decided = sum(1 for row in _read_sheet_rows(path) if str(row.get("decision") or "").strip())
+        if decided and not force:
+            raise LiteratureError(
+                f"{path.name} already has {decided} decision(s) entered; regenerating would lose them. "
+                "Use --force to replace it (the old sheet is kept)."
+            )
+        if decided:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            shutil.copy2(path, base / f"review_sheet_{stamp}.csv")
+    sources = {item["source_id"]: item for item in read_manifest(project_dir)}
+    rows = []
+    for record in verified:
+        if record.get("status") != "ok":
+            continue
+        source = sources.get(record["source_id"], {})
+        citation = str(record.get("source") or "").strip() or (
+            f"{source.get('file', record['source_id'])} (DOI {source['doi']})" if source.get("doi") else str(source.get("file", record["source_id"]))
+        )
+        rows.append(
+            {
+                "decision": "",
+                "card_id": record["card_id"],
+                "mapping_status": record["mapping_status"],
+                "confidence": record["confidence"],
+                "summary": record["summary"],
+                "supporting_excerpt": record["quote"],
+                "page": record.get("page", ""),
+                "locator": record.get("locator", ""),
+                "transferability_note": record["transferability_note"],
+                "variable_scope": LIST_SEPARATOR.join(record["variable_scope"]),
+                "target_nodes": LIST_SEPARATOR.join(record["target_nodes"]),
+                "reaction_scope": str(record.get("reaction_scope") or ""),
+                "source": citation,
+                "doi": source.get("doi", ""),
+                "checks": LIST_SEPARATOR.join(f"[{item['code']}] {item['message']}" for item in record["warnings"]),
+                "source_id": record["source_id"],
+                "finding_id": record["finding_id"],
+            }
+        )
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SHEET_COLUMNS)
+        writer.writeheader()
+        writer.writerows(rows)
+    return {
+        "sheet_path": str(path),
+        "row_count": len(rows),
+        "skipped": len(verified) - len(rows),
+        "with_checks": sum(bool(row["checks"]) for row in rows),
+    }
+
+
+def _read_sheet_rows(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
+
+
+def cards_from_sheet(project_dir: str | Path, sheet_path: str | Path | None = None) -> dict[str, Any]:
+    """Turn the accepted rows of a filled-in sheet into card dicts, re-checking each against the paper.
+
+    Raises SheetError (nothing is returned) if any accepted row has a problem: an unknown
+    decision, an edited quote that is no longer in the paper, a bad status, and so on.
+    """
+    base = work_dir(project_dir)
+    path = Path(sheet_path) if sheet_path else base / SHEET_NAME
+    if not path.exists():
+        raise LiteratureError(f"No review sheet at {path}; run evidence-sheet first.")
+    rows = _read_sheet_rows(path)
+    if rows:
+        missing = [name for name in _REQUIRED_SHEET_COLUMNS if name not in rows[0]]
+        if missing:
+            raise SheetError(f"The sheet is missing column(s): {', '.join(missing)}.", [])
+    context = json.loads((base / "context.json").read_text(encoding="utf-8"))
+    sources = {item["source_id"]: item for item in read_manifest(project_dir)}
+    problems: list[str] = []
+    cards: list[dict[str, Any]] = []
+    counts = {"accepted": 0, "rejected": 0, "undecided": 0}
+    text_cache: dict[str, dict[str, list[str]] | None] = {}
+    reviewed_on = datetime.now().strftime("%Y-%m-%d")
+    for number, row in enumerate(rows, start=2):
+        decision = str(row.get("decision") or "").strip().lower()
+        label = f"row {number} ({row.get('card_id') or 'no card_id'})"
+        if decision not in _DECISIONS:
+            problems.append(f"{label}: decision `{row.get('decision')}` must be `accept`, `reject` or empty.")
+            continue
+        if decision == "reject":
+            counts["rejected"] += 1
+            continue
+        if decision == "":
+            counts["undecided"] += 1
+            continue
+        source_id = str(row.get("source_id") or "").strip()
+        source = sources.get(source_id)
+        if source is None or source.get("status") != "ready":
+            problems.append(f"{label}: source `{source_id}` is not a prepared paper.")
+            continue
+        if source_id not in text_cache:
+            text_cache[source_id] = load_page_texts(project_dir, source_id)
+        checked = check_draft(
+            {
+                "source_id": source_id,
+                "finding_id": str(row.get("finding_id") or "").strip(),
+                "page": row.get("page"),
+                "quote": row.get("supporting_excerpt"),
+                "summary": row.get("summary"),
+                "variable_scope": _split_list(row.get("variable_scope")),
+                "proposed_mapping_status": row.get("mapping_status"),
+                "confidence": row.get("confidence") or "medium",
+                "transferability_note": row.get("transferability_note"),
+                "target_nodes": _split_list(row.get("target_nodes")) or list(DEFAULT_TARGET_NODES),
+            },
+            texts=text_cache[source_id],
+            context=context,
+            taken_card_ids=set(),
+            existing_excerpts=[],
+            reviewed=True,
+        )
+        if checked["errors"]:
+            problems.extend(f"{label}: [{item['code']}] {item['message']}" for item in checked["errors"])
+            continue
+        counts["accepted"] += 1
+        cards.append(
+            {
+                "card_id": str(row.get("card_id") or "").strip(),
+                "source": str(row.get("source") or "").strip(),
+                "summary": str(checked["summary"]).strip(),
+                "reaction_scope": str(row.get("reaction_scope") or "").strip(),
+                "variable_scope": checked["variable_scope"],
+                "target_nodes": checked["target_nodes"],
+                "mapping_status": checked["mapping_status"],
+                "confidence": checked["confidence"],
+                "allowed_use": "advisory",
+                "source_type": "literature",
+                "source_path": source.get("path", ""),
+                "doi": str(row.get("doi") or source.get("doi") or "").strip(),
+                "supporting_excerpt": str(checked["quote"]).strip(),
+                "transferability_note": str(checked["transferability_note"]).strip(),
+                "leakage_risk": "clean_literature_prior",
+                "notes": (
+                    f"Extracted from {source.get('file', source_id)}, p. {checked['page']}"
+                    + (f" ({row['locator']})" if str(row.get("locator") or "").strip() else "")
+                    + f"; file sha256 {str(source.get('sha256', ''))[:8]}. Drafted by an assistant, reviewed by the chemist on {reviewed_on}."
+                ),
+            }
+        )
+    if problems:
+        raise SheetError(
+            f"{len(problems)} problem(s) in the accepted rows; nothing was imported.", problems
+        )
+    return {"cards": cards, "sheet_path": str(path), **counts}
+
+
+def log_accepted(project_dir: str | Path, cards: list[dict[str, Any]], *, sheet_path: str, backup_dir: str) -> None:
+    """Keep a record of what a sheet added, next to the work files."""
+    path = work_dir(project_dir) / "accepted.jsonl"
+    stamp = datetime.now().isoformat(timespec="seconds")
+    with path.open("a", encoding="utf-8") as handle:
+        for card in cards:
+            handle.write(
+                json.dumps(
+                    {"card_id": card["card_id"], "accepted_at": stamp, "sheet": sheet_path, "backup_dir": backup_dir},
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )

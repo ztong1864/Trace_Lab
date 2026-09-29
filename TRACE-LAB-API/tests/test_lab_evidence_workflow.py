@@ -527,7 +527,7 @@ class VerifyDraftTests(unittest.TestCase):
         self.assertIn("unknown_source", self.codes(record))
 
 
-class VerifyDraftsOnDiskTests(unittest.TestCase):
+class _OnDiskProject(unittest.TestCase):
     def setUp(self):
         import json
 
@@ -548,7 +548,14 @@ class VerifyDraftsOnDiskTests(unittest.TestCase):
             json.dumps({"pages": _LAYOUT, "pages_reading": _READING}), encoding="utf-8"
         )
         manifest = [
-            {"source_id": "paper_ab12cd34", "status": "ready"},
+            {
+                "source_id": "paper_ab12cd34",
+                "status": "ready",
+                "file": "Paper.pdf",
+                "path": "C:/papers/Paper.pdf",
+                "sha256": "ab12cd34" + "0" * 56,
+                "doi": "10.1002/cjoc.202200768",
+            },
             {"source_id": "scan_00000000", "status": "needs_ocr"},
         ]
         (base / "sources.jsonl").write_text("".join(json.dumps(item) + "\n" for item in manifest), encoding="utf-8")
@@ -560,6 +567,9 @@ class VerifyDraftsOnDiskTests(unittest.TestCase):
             "".join(self.json.dumps(item) + "\n" for item in records) + extra, encoding="utf-8"
         )
 
+
+
+class VerifyDraftsOnDiskTests(_OnDiskProject):
     def test_report_counts_and_verified_file(self):
         good = dict(_GOOD, variable_scope=["Solvent"])
         self._write(
@@ -613,6 +623,167 @@ class VerifyDraftsOnDiskTests(unittest.TestCase):
         _shutil.rmtree(self.lit.work_dir(self.dir))
         with self.assertRaisesRegex(self.lit.LiteratureError, "evidence-prepare"):
             self.lit.verify_drafts(self.dir)
+
+
+class SheetAndAcceptTests(_OnDiskProject):
+    def setUp(self):
+        super().setUp()
+        import csv
+
+        self.csv = csv
+        self.service = LabBOService(projects_root=self.root)
+        self.client = TestClient(create_app(self.root))
+        self._write(
+            dict(_GOOD),
+            dict(
+                _GOOD,
+                finding_id="f2",
+                quote="1 10 10 DCE 59 [...] 2 10 10 THF 17",
+                summary="DCE gave 59% and THF gave 17% NMR yield of the lactone in the solvent screen.",
+            ),
+            dict(_GOOD, finding_id="f3", quote="This sentence is not in the paper at all, sorry."),
+        )
+        self.lit.verify_drafts(self.dir)
+        self.sheet_path = self.lit.work_dir(self.dir) / "review_sheet.csv"
+
+    def _build(self, **kwargs):
+        return self.lit.build_sheet(self.dir, **kwargs)
+
+    def _rows(self):
+        with self.sheet_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            return list(self.csv.DictReader(handle))
+
+    def _save(self, rows):
+        with self.sheet_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = self.csv.DictWriter(handle, fieldnames=self.lit.SHEET_COLUMNS)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _decide(self, decisions, edits=None):
+        rows = self._rows()
+        for row in rows:
+            row["decision"] = decisions.get(row["card_id"], "")
+            row.update((edits or {}).get(row["card_id"], {}))
+        self._save(rows)
+
+    def _card_count(self):
+        return self.client.get("/api/projects/ev/evidence").json()["count"]
+
+    def test_sheet_holds_only_checked_drafts_with_their_warnings(self):
+        result = self._build()
+        self.assertEqual((result["row_count"], result["skipped"]), (2, 1))
+        raw = self.sheet_path.read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"), "UTF-8 BOM so Excel opens it correctly")
+        rows = {row["card_id"]: row for row in self._rows()}
+        self.assertEqual(set(rows), {"paper_ab12cd34_f1", "paper_ab12cd34_f2"})
+        first = rows["paper_ab12cd34_f1"]
+        self.assertEqual(first["decision"], "")
+        self.assertEqual(first["supporting_excerpt"], "7 10 10 Toluene 87 (81b)")
+        self.assertEqual(first["variable_scope"], "Solvent")
+        self.assertEqual(first["source"], "Paper.pdf (DOI 10.1002/cjoc.202200768)")
+        self.assertIn("[lookup_like]", rows["paper_ab12cd34_f2"]["checks"])
+
+    def test_a_sheet_with_decisions_is_not_overwritten_without_force(self):
+        self._build()
+        self._decide({"paper_ab12cd34_f1": "accept"})
+        with self.assertRaisesRegex(self.lit.LiteratureError, "already has 1 decision"):
+            self._build()
+        self._build(force=True)
+        self.assertEqual({row["decision"] for row in self._rows()}, {""})
+        self.assertEqual(len(list(self.sheet_path.parent.glob("review_sheet_*.csv"))), 1, "old sheet kept")
+
+    def test_accepted_rows_become_cards_and_everything_else_is_left_out(self):
+        self._build()
+        self._decide({"paper_ab12cd34_f1": "accept", "paper_ab12cd34_f2": "reject"})
+        result = self.service.accept_evidence_sheet("ev")
+        self.assertEqual((result["accepted"], result["rejected"], result["undecided"]), (1, 1, 0))
+        self.assertEqual(result["card_ids"], ["paper_ab12cd34_f1"])
+        self.assertEqual(self._card_count(), 1)
+        card = self.client.get("/api/projects/ev/evidence").json()["cards"][0]
+        self.assertEqual(card["mapping_status"], "same_reaction_family")
+        self.assertEqual(card["doi"], "10.1002/cjoc.202200768")
+        self.assertEqual(card["supporting_excerpt"], "7 10 10 Toluene 87 (81b)")
+        self.assertIn("p. 2", card["notes"])
+        self.assertIn("reviewed by the chemist", card["notes"])
+        stored = self.project.evidence_path.read_text(encoding="utf-8")
+        self.assertIn("C:/papers/Paper.pdf", stored)
+        self.assertTrue(Path(result["backup_dir"]).exists())
+        logged = (self.lit.work_dir(self.dir) / "accepted.jsonl").read_text(encoding="utf-8")
+        self.assertIn("paper_ab12cd34_f1", logged)
+
+    def test_nothing_decided_imports_nothing(self):
+        self._build()
+        result = self.service.accept_evidence_sheet("ev")
+        self.assertEqual((result["imported_count"], result["undecided"]), (0, 2))
+        self.assertEqual(self._card_count(), 0)
+
+    def test_a_typo_in_decision_stops_everything(self):
+        self._build()
+        self._decide({"paper_ab12cd34_f1": "accept", "paper_ab12cd34_f2": "acept"})
+        with self.assertRaises(self.lit.SheetError) as caught:
+            self.service.accept_evidence_sheet("ev")
+        self.assertIn("`acept`", " ".join(caught.exception.problems))
+        self.assertEqual(self._card_count(), 0, "the valid accepted row was not imported either")
+
+    def test_an_edited_quote_must_still_be_in_the_paper(self):
+        self._build()
+        self._decide(
+            {"paper_ab12cd34_f1": "accept"},
+            {"paper_ab12cd34_f1": {"supporting_excerpt": "7 10 10 Toluene 97 (81b)"}},
+        )
+        with self.assertRaises(self.lit.SheetError) as caught:
+            self.service.accept_evidence_sheet("ev")
+        self.assertIn("quote_not_found", " ".join(caught.exception.problems))
+        self.assertEqual(self._card_count(), 0)
+
+    def test_an_edited_summary_is_rechecked_too(self):
+        self._build()
+        self._decide(
+            {"paper_ab12cd34_f1": "accept"},
+            {"paper_ab12cd34_f1": {"summary": "Toluene gave 92% NMR yield of the lactone in this solvent screen."}},
+        )
+        with self.assertRaises(self.lit.SheetError) as caught:
+            self.service.accept_evidence_sheet("ev")
+        self.assertIn("number_not_in_quote", " ".join(caught.exception.problems))
+
+    def test_the_chemist_may_upgrade_the_status_and_set_the_papers_scope(self):
+        self._build()
+        self._decide(
+            {"paper_ab12cd34_f1": "accept"},
+            {"paper_ab12cd34_f1": {"mapping_status": "direct", "reaction_scope": "esterification of phenols"}},
+        )
+        self.service.accept_evidence_sheet("ev")
+        card = self.client.get("/api/projects/ev/evidence").json()["cards"][0]
+        self.assertEqual((card["mapping_status"], card["reaction_scope"]), ("direct", "esterification of phenols"))
+        # ...and the preview then shows the consequence of that choice.
+        preview = self.client.get("/api/projects/ev/evidence/preview").json()
+        never = {item["card_id"]: item for item in preview["never_retrieved"]}
+        self.assertEqual(never["paper_ab12cd34_f1"]["reason"], "reaction_scope_mismatch")
+
+    def test_a_chemist_cannot_smuggle_in_an_invalid_status(self):
+        self._build()
+        self._decide(
+            {"paper_ab12cd34_f1": "accept"},
+            {"paper_ab12cd34_f1": {"mapping_status": "same_redox_manifold"}},
+        )
+        with self.assertRaises(self.lit.SheetError) as caught:
+            self.service.accept_evidence_sheet("ev")
+        self.assertIn("bad_status", " ".join(caught.exception.problems))
+
+    def test_accepting_the_same_sheet_twice_does_not_duplicate_cards(self):
+        from chem_agent_bo.lab.evidence import EvidenceImportError
+
+        self._build()
+        self._decide({"paper_ab12cd34_f1": "accept"})
+        self.service.accept_evidence_sheet("ev")
+        with self.assertRaises(EvidenceImportError):
+            self.service.accept_evidence_sheet("ev")
+        self.assertEqual(self._card_count(), 1)
+
+    def test_a_sheet_without_the_needed_columns_is_refused(self):
+        self.sheet_path.write_text("decision,card_id\naccept,x\n", encoding="utf-8")
+        with self.assertRaisesRegex(self.lit.SheetError, "missing column"):
+            self.service.accept_evidence_sheet("ev")
 
 
 if __name__ == "__main__":

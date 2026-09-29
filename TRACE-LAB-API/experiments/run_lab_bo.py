@@ -142,6 +142,20 @@ def parse_args() -> argparse.Namespace:
     )
     verify_parser.add_argument("--project-dir", required=True)
     verify_parser.add_argument("--json", action="store_true", help="Print every checked record as JSON.")
+
+    sheet_parser = subparsers.add_parser(
+        "evidence-sheet",
+        help="Write review_sheet.csv (one row per verified draft) for the chemist to accept or reject.",
+    )
+    sheet_parser.add_argument("--project-dir", required=True)
+    sheet_parser.add_argument("--force", action="store_true", help="Replace a sheet that already has decisions.")
+
+    accept_parser = subparsers.add_parser(
+        "evidence-accept",
+        help="Import the rows marked `accept` in the review sheet (re-checked; old evidence file backed up).",
+    )
+    accept_parser.add_argument("--project-dir", required=True)
+    accept_parser.add_argument("--sheet", default="", help="Sheet to read (default: evidence_work/review_sheet.csv).")
     return parser.parse_args()
 
 
@@ -317,6 +331,39 @@ def main() -> None:
             _print_verify_report(report)
         if report["rejected"] or report["unreadable_lines"]:
             raise SystemExit(1)
+        return
+    if args.command == "evidence-sheet":
+        from chem_agent_bo.lab.literature import LiteratureError, build_sheet
+
+        try:
+            result = build_sheet(service.project_path(args.project_dir), force=args.force)
+        except LiteratureError as exc:
+            raise SystemExit(str(exc)) from exc
+        print(f"Wrote {result['row_count']} row(s) to {result['sheet_path']} ({result['with_checks']} with checks to read).")
+        if result["skipped"]:
+            print(f"{result['skipped']} draft(s) left out because they were rejected or duplicates; see evidence-verify.")
+        print("Give it to the chemist: set `decision` to accept or reject on each row (edit the wording if needed).")
+        return
+    if args.command == "evidence-accept":
+        from chem_agent_bo.lab.literature import LiteratureError
+
+        try:
+            result = service.accept_evidence_sheet(args.project_dir, sheet_path=args.sheet or None)
+        except EvidenceImportError as exc:
+            _print_json({"imported": False, "error": str(exc), "problems": exc.problems})
+            raise SystemExit(1) from exc
+        except LiteratureError as exc:
+            _print_json({"imported": False, "error": str(exc), "problems": getattr(exc, "problems", [])})
+            raise SystemExit(1) from exc
+        print(
+            f"Accepted {result['accepted']}, rejected {result['rejected']}, undecided {result['undecided']}. "
+            f"Imported {result['imported_count']} card(s)."
+        )
+        for card_id in result["card_ids"]:
+            print(f"  + {card_id}")
+        if result["imported_count"]:
+            print(f"Project now has {result['card_count']} card(s). Previous file backed up in {result['backup_dir']}")
+            print("Run evidence-preview to see which cards the controller will now be shown.")
         return
     if args.command == "unregister":
         _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))

@@ -418,6 +418,26 @@ class LabBOService:
             "backup_dir": str(backup_dir),
         }
 
+    def accept_evidence_sheet(
+        self, project_id_or_dir: str | Path, *, sheet_path: str | Path | None = None
+    ) -> dict[str, Any]:
+        """Import the rows a chemist marked `accept` in the review sheet.
+
+        Each accepted row is re-checked against its paper first (an edited quote must still be
+        in the text). Any problem stops everything; then the cards go through `import_evidence`,
+        which validates strictly, takes the project lock and backs up the old evidence file.
+        """
+        from chem_agent_bo.lab.literature import cards_from_sheet, log_accepted
+
+        project_dir = self.project_path(project_id_or_dir)
+        parsed = cards_from_sheet(project_dir, sheet_path)
+        summary = {key: parsed[key] for key in ("accepted", "rejected", "undecided", "sheet_path")}
+        if not parsed["cards"]:
+            return {**summary, "imported_count": 0, "card_ids": []}
+        result = self.import_evidence(project_id_or_dir, cards=parsed["cards"], mode="append")
+        log_accepted(project_dir, parsed["cards"], sheet_path=parsed["sheet_path"], backup_dir=result["backup_dir"])
+        return {**summary, **result, "card_ids": [card["card_id"] for card in parsed["cards"]]}
+
     def evidence_preview(self, project_id_or_dir: str | Path) -> dict[str, Any]:
         """Which evidence cards an ask would show the controller, and why the others never are."""
         project = LabProject(self.project_path(project_id_or_dir))
