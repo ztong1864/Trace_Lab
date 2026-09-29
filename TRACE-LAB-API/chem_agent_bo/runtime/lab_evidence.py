@@ -21,12 +21,14 @@ class LabEvidenceProvider:
         reaction_scope: str,
         target_nodes: list[str] | None = None,
         max_items: int = 5,
+        selection: str = "score",
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         cards = self.store.applicable(
             variables=variables,
             reaction_scope=reaction_scope,
             target_nodes=target_nodes or [],
             max_items=max_items,
+            selection=selection,
         )
         units = [self._card_to_unit(card, rank=rank) for rank, card in enumerate(cards, start=1)]
         meta = {
@@ -34,6 +36,7 @@ class LabEvidenceProvider:
             "reaction_scope": reaction_scope,
             "variables": list(variables),
             "target_nodes": list(target_nodes or []),
+            "selection": selection,
             "retrieved_count": len(units),
             "retrieved_card_ids": [unit["id"] for unit in units],
             "retrieved_mapping_statuses": [

@@ -23,7 +23,12 @@ from chem_agent_bo.bo.registry import build_planner, supported_acquisitions, val
 from chem_agent_bo.config import load_agentic_bo_config
 from chem_agent_bo.config.schema import AgenticBOConfig
 from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
-from chem_agent_bo.lab.evidence import LAB_EVIDENCE_TARGET_NODES, EvidenceStore, retrieval_preview
+from chem_agent_bo.lab.evidence import (
+    LAB_EVIDENCE_TARGET_NODES,
+    SELECTION_MODES,
+    EvidenceStore,
+    retrieval_preview,
+)
 from chem_agent_bo.lab.project import (
     LabProject,
     ObservationTable,
@@ -55,6 +60,7 @@ EDITABLE_CONFIG_FIELDS = (
     "seed",
     "planner_use_descriptors",
     "allow_random_fallback",
+    "evidence_selection",
 )
 LOCKED_CONFIG_FIELDS = ("project_id", "objective_name", "goal")
 # Largest CSV/JSON text accepted for one part of an upload (design, descriptors, ...).
@@ -456,6 +462,7 @@ class LabBOService:
             variables=design_space.variable_names,
             reaction_scope=config.reaction_scope,
             top_k=top_k,
+            selection=config.evidence_selection,
         )
         by_id = {card.card_id: card for card in store.cards}
         for group in ("retrieved", "not_shown", "never_retrieved"):
@@ -770,6 +777,7 @@ class LabBOService:
             reaction_scope=config.reaction_scope,
             target_nodes=list(LAB_EVIDENCE_TARGET_NODES),
             max_items=5,
+            selection=config.evidence_selection,
         )
         created_at = _now_iso()
         candidate_pool = _candidate_pool_items(
@@ -802,6 +810,7 @@ class LabBOService:
                 reaction_scope=config.reaction_scope,
                 target_nodes=list(LAB_EVIDENCE_TARGET_NODES),
                 max_items=int(agent_config.orchestrator.knowledge_top_k or 5),
+                selection=config.evidence_selection,
             )
             evidence_trace = {
                 **knowledge_meta,
@@ -1075,6 +1084,7 @@ class LabBOService:
                 reaction_scope=config.reaction_scope,
                 target_nodes=list(LAB_EVIDENCE_TARGET_NODES),
                 max_items=int(agent_config.orchestrator.knowledge_top_k or 5),
+                selection=config.evidence_selection,
             )
 
         appended: list[dict[str, Any]] = []
@@ -1246,6 +1256,7 @@ class LabBOService:
             reaction_scope=config.reaction_scope,
             target_nodes=list(LAB_EVIDENCE_TARGET_NODES),
             max_items=int(agent_config.orchestrator.knowledge_top_k or 5),
+            selection=config.evidence_selection,
         )
         param_space = design_space.param_space()
         reflections: list[dict[str, Any]] = []
@@ -1620,6 +1631,11 @@ def _parse_config_updates(updates: dict[str, Any], *, current: ProjectConfig) ->
             if mode not in {"agentic", "bo_only"}:
                 raise ValueError(f"controller_mode must be `agentic` or `bo_only`; got {value!r}.")
             values[name] = mode
+        elif name == "evidence_selection":
+            choice = str(value or "").strip().lower()
+            if choice not in SELECTION_MODES:
+                raise ValueError(f"evidence_selection must be one of {list(SELECTION_MODES)}; got {value!r}.")
+            values[name] = choice
         else:
             if not isinstance(value, str) or (name != "reaction_scope" and not value.strip()):
                 raise ValueError(f"{name} must be a non-empty string; got {value!r}.")
@@ -1671,6 +1687,10 @@ def _validate_project_config(config: ProjectConfig, *, project_dir: Path) -> Non
             planner_name=config.planner_name,
         )
     validate_planner_options(config.planner_options)
+    if config.evidence_selection not in SELECTION_MODES:
+        raise ValueError(
+            f"evidence_selection must be one of {list(SELECTION_MODES)}; got `{config.evidence_selection}`."
+        )
     if config.controller_mode == "agentic":
         try:
             _resolve_agent_config_path(config.agent_config_path, project_dir=project_dir)

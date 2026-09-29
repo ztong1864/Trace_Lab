@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -44,10 +45,13 @@ SCREEN_REASONS = {
     "no_variable_overlap": "variable_scope shares no variable with the design space.",
     "target_node_mismatch": "target_nodes lists no controller node that asks for evidence.",
     "reaction_scope_mismatch": (
-        "mapping_status is direct/same_start_end, but the card's reaction_scope is not contained in "
-        "(or containing) the project's reaction_scope."
+        "mapping_status is direct/same_start_end, but the card's reaction_scope is neither contained in "
+        "(or containing) the project's reaction_scope nor shares two key words with it."
     ),
 }
+# How an ask picks its cards. `score` ranks every eligible card; `per_variable` first gives each
+# optimized variable its most specific card, then tops up by score.
+SELECTION_MODES = ("score", "per_variable")
 MAPPING_PRIORITY = {
     "direct": 50,
     "same_start_end": 42,
@@ -139,21 +143,13 @@ class EvidenceStore:
         reaction_scope: str = "",
         target_nodes: list[str] | None = None,
         max_items: int = 5,
+        selection: str = "score",
     ) -> list[EvidenceCard]:
-        scored: list[tuple[float, int, EvidenceCard]] = []
-        for card in self.cards:
-            score, _reason = self._screen(
-                card, variables=variables, reaction_scope=reaction_scope, target_nodes=target_nodes
-            )
-            if score is not None:
-                scored.append((score, len(scored), card))
+        screened = self._screen_all(variables, reaction_scope, target_nodes)
+        passing = [(index, score) for index, (_card, score, _reason) in enumerate(screened) if score is not None]
+        order, _slots = self._order(passing, variables, selection)
         limit = max(0, int(max_items))
-        return [
-            card
-            for _score, _idx, card in sorted(scored, key=lambda item: (-item[0], item[1]))[
-                :limit
-            ]
-        ]
+        return [self.cards[index] for index in order[:limit]]
 
     def explain(
         self,
@@ -162,20 +158,18 @@ class EvidenceStore:
         reaction_scope: str = "",
         target_nodes: list[str] | None = None,
         max_items: int = 5,
+        selection: str = "score",
     ) -> list[dict[str, Any]]:
         """One entry per card: whether `applicable` would return it, at which rank, or why never.
 
-        Uses the same screening as `applicable`, so the two cannot disagree. `reason` is
-        empty for a card that passes the screen (it may still miss the `max_items` cut).
+        Uses the same screening and ordering as `applicable`, so the two cannot disagree.
+        `reason` is empty for a card that passes the screen (it may still miss the `max_items`
+        cut); `slots` lists the variables a card was picked for in `per_variable` selection.
         """
-        screened = [
-            (card, *self._screen(card, variables=variables, reaction_scope=reaction_scope, target_nodes=target_nodes))
-            for card in self.cards
-        ]
+        screened = self._screen_all(variables, reaction_scope, target_nodes)
         passing = [(index, score) for index, (_card, score, _reason) in enumerate(screened) if score is not None]
-        # Same ordering as `applicable`: score descending, then file order.
-        ranked = [index for index, _score in sorted(passing, key=lambda item: (-item[1], item[0]))]
-        rank_of = {index: rank for rank, index in enumerate(ranked, start=1)}
+        order, slots = self._order(passing, variables, selection)
+        rank_of = {index: rank for rank, index in enumerate(order, start=1)}
         limit = max(0, int(max_items))
         entries = []
         for index, (card, score, reason) in enumerate(screened):
@@ -188,11 +182,58 @@ class EvidenceStore:
                     "score": None if score is None else round(score, 2),
                     "rank": rank,
                     "retrieved": rank is not None and rank <= limit,
+                    "slots": list(slots.get(index, [])),
                     "reason": reason,
                     "reason_text": SCREEN_REASONS.get(reason, ""),
                 }
             )
         return entries
+
+    def _screen_all(
+        self, variables: list[str], reaction_scope: str, target_nodes: list[str] | None
+    ) -> list[tuple[EvidenceCard, float | None, str]]:
+        return [
+            (card, *self._screen(card, variables=variables, reaction_scope=reaction_scope, target_nodes=target_nodes))
+            for card in self.cards
+        ]
+
+    def _order(
+        self, passing: list[tuple[int, float]], variables: list[str], selection: str
+    ) -> tuple[list[int], dict[int, list[str]]]:
+        """Card indexes in retrieval order (every eligible card, best first), plus the variable slots.
+
+        `score` is score descending, then file order. `per_variable` puts first, in design
+        order, the card that suits each optimized variable best: mapping status first, then the
+        card naming the fewest optimized variables (the most specific), then confidence, then
+        file order. One card may fill several slots. Everything else follows in score order.
+        """
+        mode = str(selection or "score").strip().lower()
+        if mode not in SELECTION_MODES:
+            raise ValueError(f"evidence selection must be one of {list(SELECTION_MODES)}; got `{selection}`.")
+        by_score = [index for index, _score in sorted(passing, key=lambda item: (-item[1], item[0]))]
+        if mode == "score":
+            return by_score, {}
+        optimized = {_norm(name) for name in variables}
+        scope_of = {index: {_norm(name) for name in self.cards[index].variable_scope} for index in by_score}
+        chosen: list[int] = []
+        slots: dict[int, list[str]] = {}
+        for name in variables:
+            candidates = [index for index in by_score if _norm(name) in scope_of[index]]
+            if not candidates:
+                continue
+            best = min(
+                candidates,
+                key=lambda index: (
+                    -MAPPING_PRIORITY.get(self.cards[index].mapping_status, 0),
+                    len(scope_of[index] & optimized),
+                    -_confidence_score(self.cards[index].confidence),
+                    index,
+                ),
+            )
+            slots.setdefault(best, []).append(name)
+            if best not in chosen:
+                chosen.append(best)
+        return chosen + [index for index in by_score if index not in chosen], slots
 
     @staticmethod
     def _screen(
@@ -223,7 +264,11 @@ class EvidenceStore:
         if reaction_scope and card.reaction_scope:
             reaction_match = _reaction_match(reaction_scope, card.reaction_scope)
             if not reaction_match:
-                if card.mapping_status in {"direct", "same_start_end"}:
+                # The rank bonus above stays strict; only the decision to hide a card that claims
+                # direct precedent is lenient, so no card moves in the ranking.
+                if card.mapping_status in {"direct", "same_start_end"} and not _reaction_related(
+                    reaction_scope, card.reaction_scope
+                ):
                     return None, "reaction_scope_mismatch"
         else:
             reaction_match = False
@@ -242,6 +287,7 @@ def retrieval_preview(
     variables: list[str],
     reaction_scope: str,
     top_k: int = 5,
+    selection: str = "score",
 ) -> dict[str, Any]:
     """What the controller would be shown for a project, using the retrieval an ask really makes.
 
@@ -255,6 +301,7 @@ def retrieval_preview(
         reaction_scope=reaction_scope,
         target_nodes=list(LAB_EVIDENCE_TARGET_NODES),
         max_items=top_k,
+        selection=selection,
     )
     retrieved = sorted((item for item in entries if item["retrieved"]), key=lambda item: item["rank"])
     not_shown = sorted(
@@ -264,6 +311,7 @@ def retrieval_preview(
     never = [item for item in entries if item["rank"] is None]
     return {
         "top_k": int(top_k),
+        "selection": str(selection or "score").strip().lower(),
         "card_count": len(entries),
         "retrieved": retrieved,
         "not_shown": not_shown,
@@ -362,6 +410,37 @@ def _as_list(value: Any) -> list[str]:
 
 def _norm(value: object) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+# Words too generic to say two reactions are related.
+_SCOPE_STOPWORDS = frozenset(
+    {
+        "with", "from", "into", "under", "that", "this", "using", "based", "over", "their", "which",
+        "reaction", "reactions", "catalyzed", "catalysed", "catalytic", "catalysis", "system",
+        "systems", "conditions", "method", "process", "synthesis", "study", "route",
+    }
+)
+
+
+def _scope_stems(text: str) -> set[str]:
+    """Content words of a reaction scope, cut to six letters so lactone / lactonization and
+    oxidation / oxidative meet."""
+    return {
+        word[:6]
+        for word in re.findall(r"[a-z0-9]+", str(text or "").lower())
+        if len(word) >= 4 and word not in _SCOPE_STOPWORDS
+    }
+
+
+def _reaction_related(requested: str, card_scope: str) -> bool:
+    """Loose test used only to decide whether a card claiming direct precedent is about the same
+    kind of reaction: the strict containment test, or at least two shared key words (or, for a very
+    short scope, all of its key words)."""
+    if _reaction_match(requested, card_scope):
+        return True
+    ours, theirs = _scope_stems(requested), _scope_stems(card_scope)
+    needed = min(2, len(ours), len(theirs))
+    return needed > 0 and len(ours & theirs) >= needed
 
 
 def _reaction_match(requested: str, card_scope: str) -> bool:

@@ -22,6 +22,7 @@ from chem_agent_bo.lab.design_space import DesignSpace
 from chem_agent_bo.lab.evidence import (
     ALLOWED_MAPPING_STATUSES,
     SCREEN_REASONS,
+    SELECTION_MODES,
     EvidenceStore,
     _card_from_dict,
     retrieval_preview,
@@ -341,9 +342,15 @@ def _warn_unretrievable_cards(
     filename: str, cards: list[tuple[int, dict[str, Any]]], design: DesignSpace, config: ProjectConfig, report: _Report
 ) -> None:
     """Warn about cards the controller can never see by accident (not the deliberately blocked ones)."""
+    if config.evidence_selection not in SELECTION_MODES:
+        return  # the config check reports the bad value; don't crash on it here
     store = EvidenceStore([_card_from_dict(card) for _line, card in cards])
     preview = retrieval_preview(
-        store, variables=design.variable_names, reaction_scope=config.reaction_scope, top_k=len(cards) or 1
+        store,
+        variables=design.variable_names,
+        reaction_scope=config.reaction_scope,
+        top_k=len(cards) or 1,
+        selection=config.evidence_selection,
     )
     by_reason: dict[str, list[str]] = {}
     for item in preview["never_retrieved"]:

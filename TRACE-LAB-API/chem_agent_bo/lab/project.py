@@ -42,6 +42,9 @@ class ProjectConfig:
     controller_mode: str = "agentic"
     agent_config_path: str = "configs/agent_bo.yaml"
     planner_use_descriptors: bool = False
+    # How an ask picks its evidence cards: `score` (rank every card) or `per_variable`
+    # (a most-specific card for each optimized variable first). See evidence.SELECTION_MODES.
+    evidence_selection: str = "score"
     created_at: str = ""
     updated_at: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -69,6 +72,7 @@ class ProjectConfig:
             ),
             agent_config_path=str(self.agent_config_path or "configs/agent_bo.yaml"),
             planner_use_descriptors=_parse_bool(self.planner_use_descriptors, default=False),
+            evidence_selection=str(self.evidence_selection or "score").strip().lower(),
             created_at=created,
             updated_at=now,
             metadata=dict(self.metadata or {}),

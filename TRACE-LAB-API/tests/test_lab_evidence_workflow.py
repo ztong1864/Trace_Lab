@@ -786,5 +786,211 @@ class SheetAndAcceptTests(_OnDiskProject):
             self.service.accept_evidence_sheet("ev")
 
 
+class ScopeRuleTests(unittest.TestCase):
+    """A card claiming direct precedent is hidden only when its reaction is unrelated to the project's."""
+
+    project_scope = (
+        "Intramolecular oxidative lactonization of a user-selected hydroxy-alcohol precursor to the "
+        "corresponding lactone under an iron(III)-nitrate/nitroxyl oxidation manifold."
+    )
+
+    def _related(self, card_scope):
+        from chem_agent_bo.lab.evidence import _reaction_related
+
+        return _reaction_related(self.project_scope, card_scope)
+
+    def test_the_same_kind_of_reaction_is_related_even_when_worded_differently(self):
+        self.assertTrue(self._related("aerobic oxidative lactonization of 1,4-diols to γ-butyrolactones"))
+        self.assertTrue(self._related("iron/nitroxyl aerobic oxidative lactonization"))
+        self.assertTrue(self._related("oxidative lactonization"))
+
+    def test_a_different_reaction_is_not(self):
+        self.assertFalse(self._related("esterification of phenols"))
+        self.assertFalse(self._related("palladium catalyzed cross coupling of aryl halides"))
+
+    def test_known_limit_neighbouring_chemistry_can_share_two_general_words(self):
+        """The rule reads words, not chemistry: 'oxidation' and 'alcohol' also occur in this project's
+        scope, so a benzylic alcohol oxidation counts as related. Whether a card really is direct
+        precedent stays the chemist's call (mapping_status); this only decides whether to hide it."""
+        self.assertTrue(self._related("benzylic oxidation of alcohols"))
+
+    def test_one_shared_general_word_is_not_enough(self):
+        self.assertFalse(self._related("aerobic oxidation of sulfides"))
+
+    def test_a_short_scope_needs_all_of_its_key_words(self):
+        self.assertTrue(self._related("lactonization"))
+        self.assertFalse(self._related("amidation"))
+
+    def test_only_the_decision_to_hide_a_card_is_loosened_not_the_rank_bonus(self):
+        from chem_agent_bo.lab.evidence import LAB_EVIDENCE_TARGET_NODES, _card_score
+
+        card = _card(
+            "li",
+            mapping_status="same_start_end",
+            reaction_scope="aerobic oxidative lactonization of 1,4-diols",
+            variable_scope=["Solvent"],
+            confidence="0.9",
+        )
+        score, reason = EvidenceStore._screen(
+            card, variables=["Solvent"], reaction_scope=self.project_scope, target_nodes=list(LAB_EVIDENCE_TARGET_NODES)
+        )
+        self.assertEqual(reason, "")
+        self.assertEqual(score, _card_score(card, variable_overlap=1, target_overlap=0, reaction_match=False))
+
+    def test_an_unrelated_direct_card_is_still_hidden(self):
+        card = _card("phenol", mapping_status="direct", reaction_scope="esterification of phenols")
+        score, reason = EvidenceStore._screen(card, variables=["Solvent"], reaction_scope=self.project_scope)
+        self.assertEqual((score, reason), (None, "reaction_scope_mismatch"))
+
+
+class SelectionModeTests(unittest.TestCase):
+    """`per_variable` gives each optimized variable its most specific card, then tops up by score."""
+
+    variables = ["A", "B", "C"]
+
+    def _store(self, *cards):
+        return EvidenceStore(list(cards))
+
+    def _ids(self, store, **kwargs):
+        options = dict(variables=self.variables, max_items=10, selection="per_variable")
+        options.update(kwargs)
+        return [card.card_id for card in store.applicable(**options)]
+
+    def test_a_specific_card_takes_the_slot_of_its_variable_ahead_of_a_broad_one(self):
+        store = self._store(
+            _card("broad", variable_scope=["A", "B", "C"], mapping_status="same_reaction_family", confidence="0.97"),
+            _card("spec_a", variable_scope=["A"], mapping_status="same_reaction_family", confidence="0.8"),
+            _card("spec_b", variable_scope=["B"], mapping_status="same_reaction_family", confidence="0.8"),
+        )
+        self.assertEqual(self._ids(store), ["spec_a", "spec_b", "broad"])
+        self.assertEqual(self._ids(store, selection="score")[0], "broad", "score mode is untouched")
+
+    def test_mapping_status_still_beats_specificity(self):
+        store = self._store(
+            _card("broad_family", variable_scope=["A", "B", "C"], mapping_status="same_reaction_family"),
+            _card("spec_variable_level", variable_scope=["A"], mapping_status="variable_level"),
+        )
+        self.assertEqual(self._ids(store)[0], "broad_family")
+
+    def test_confidence_breaks_a_tie_between_equally_specific_cards(self):
+        store = self._store(
+            _card("low", variable_scope=["A"], confidence="0.6"),
+            _card("high", variable_scope=["A"], confidence="0.9"),
+        )
+        self.assertEqual(self._ids(store)[0], "high")
+
+    def test_one_card_can_fill_two_slots_and_is_listed_once(self):
+        store = self._store(_card("ab", variable_scope=["A", "B"]), _card("c", variable_scope=["C"]))
+        explained = {item["card_id"]: item for item in store.explain(variables=self.variables, selection="per_variable")}
+        self.assertEqual(explained["ab"]["slots"], ["A", "B"])
+        self.assertEqual(explained["c"]["slots"], ["C"])
+        self.assertEqual(self._ids(store), ["ab", "c"])
+
+    def test_cards_that_fill_no_slot_follow_in_score_order(self):
+        store = self._store(
+            _card("spec_a", variable_scope=["A"]),
+            _card("background_b", variable_scope=["B"], mapping_status="background", confidence="0.99"),
+            _card("nameless", variable_scope=[], mapping_status="same_reaction_family"),
+        )
+        # A -> spec_a; B -> background_b; C has no card; nameless has no scope so it only tops up.
+        self.assertEqual(self._ids(store), ["spec_a", "background_b", "nameless"])
+
+    def test_fewer_slots_than_variables_keeps_the_first_in_design_order(self):
+        store = self._store(
+            _card("spec_a", variable_scope=["A"]), _card("spec_b", variable_scope=["B"]), _card("spec_c", variable_scope=["C"])
+        )
+        self.assertEqual(self._ids(store, max_items=2), ["spec_a", "spec_b"])
+
+    def test_applicable_and_explain_agree_at_every_cut(self):
+        store = self._store(
+            _card("broad", variable_scope=["A", "B", "C"], confidence="0.97"),
+            _card("spec_a", variable_scope=["A"], confidence="0.8"),
+            _card("spec_c", variable_scope=["C"], confidence="0.7"),
+            _card("only_b", variable_scope=["B"], mapping_status="variable_level"),
+            _card("hidden", mapping_status="out_of_scope"),
+        )
+        for k in range(0, 7):
+            with self.subTest(k=k):
+                applicable = self._ids(store, max_items=k)
+                explained = sorted(
+                    (e for e in store.explain(variables=self.variables, max_items=k, selection="per_variable") if e["retrieved"]),
+                    key=lambda e: e["rank"],
+                )
+                self.assertEqual(applicable, [e["card_id"] for e in explained])
+
+    def test_an_unknown_mode_is_an_error_not_a_silent_fallback(self):
+        with self.assertRaisesRegex(ValueError, "per_variable"):
+            self._store(_card("x")).applicable(variables=self.variables, selection="by_magic")
+
+    def test_score_mode_is_the_default_and_is_unchanged(self):
+        store = self._store(_card("broad", variable_scope=["A", "B", "C"]), _card("spec", variable_scope=["A"]))
+        default = [c.card_id for c in store.applicable(variables=self.variables, max_items=10)]
+        explicit = [c.card_id for c in store.applicable(variables=self.variables, max_items=10, selection="score")]
+        self.assertEqual(default, explicit)
+        self.assertEqual(default[0], "broad")
+
+
+class SelectionSettingTests(unittest.TestCase):
+    """The mode is a project setting: editable, validated, honoured by an ask, and shown by the preview."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "root"
+        self.service = LabBOService(projects_root=self.root)
+        self.project = _create_small_project(self.service, "sel", planner_name="random", batch_size=2)
+        self.client = TestClient(create_app(self.root))
+        cards = [
+            {"card_id": "broad", "summary": "Broad card.", "variable_scope": ["Catalyst", "Solvent", "Base"], "confidence": "0.97"},
+            {"card_id": "spec_solvent", "summary": "Solvent card.", "variable_scope": ["Solvent"], "confidence": "0.8"},
+            {"card_id": "spec_base", "summary": "Base card.", "variable_scope": ["Base"], "confidence": "0.8"},
+        ]
+        response = self.client.post("/api/projects/sel/evidence/import", json={"cards": cards})
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def _patch(self, value):
+        return self.client.patch("/api/projects/sel/config", json={"evidence_selection": value})
+
+    def test_default_is_score(self):
+        self.assertEqual(self.project.load_config().evidence_selection, "score")
+
+    def test_it_can_be_changed_and_is_saved(self):
+        response = self._patch("per_variable")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("evidence_selection", response.json()["changed"])
+        self.assertEqual(self.project.load_config().evidence_selection, "per_variable")
+
+    def test_a_bad_value_is_refused_and_leaves_the_setting_alone(self):
+        response = self._patch("by_magic")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("per_variable", response.text)
+        self.assertEqual(self.project.load_config().evidence_selection, "score")
+
+    def test_the_project_check_flags_a_bad_value_in_project_yaml(self):
+        path = self.project.config_path
+        path.write_text(path.read_text(encoding="utf-8") + "evidence_selection: by_magic\n", encoding="utf-8")
+        report = self.service.check_project("sel")
+        self.assertFalse(report["ok"])
+        self.assertIn("evidence_selection", " ".join(item["message"] for item in report["errors"]))
+
+    def test_an_ask_uses_the_mode_for_the_evidence_it_cites(self):
+        def refs():
+            batch = self.service.ask("sel", batch_size=2, planner_name="random", controller_mode="bo_only")
+            return list(batch["recommendations"][0]["evidence_refs"])
+
+        self.assertEqual(refs()[0], "broad")
+        self._patch("per_variable")
+        # per_variable: Catalyst -> broad (only card naming it), Solvent -> spec_solvent, Base -> spec_base
+        self.assertEqual(refs(), ["broad", "spec_solvent", "spec_base"])
+
+    def test_the_preview_reports_the_mode_and_each_cards_slots(self):
+        self._patch("per_variable")
+        body = self.client.get("/api/projects/sel/evidence/preview").json()
+        self.assertEqual(body["selection"], "per_variable")
+        slots = {item["card_id"]: item["slots"] for item in body["retrieved"]}
+        self.assertEqual(slots["spec_solvent"], ["Solvent"])
+        self.assertEqual(slots["spec_base"], ["Base"])
+
+
 if __name__ == "__main__":
     unittest.main()
