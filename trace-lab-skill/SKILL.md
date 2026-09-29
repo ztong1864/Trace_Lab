@@ -53,25 +53,60 @@ python trace-collab-skill\scripts\trace_lab_api.py summary oxidative_esterificat
 
 检查内容：
 
-- 项目是否存在。
+- 项目是否存在。`projects --format summary` 列出所有项目的 handle（URL 和命令里用的名字）、是否为注册的外部项目、observations 和 pending 数量。
 - active variables 是否正确。
 - 是否已有 observations。
-- 是否存在 pending recommendations。
+- 是否存在 pending recommendations（摘要里的 `pending_recommendation_count`）。
 - `controller_mode`、`planner_name`、`batch_size` 是否符合本轮需求。
+
+项目文件可能有问题时（外部导入、手工编辑过），先运行检查：
+
+```powershell
+python trace-collab-skill\scripts\trace_lab_api.py check my_project --format summary
+```
+
+检查会列出错误（例如 observations 里有设计空间之外的取值、描述符重复或缺失、轮次编号有缺口）和警告，并给出计数，便于和项目 README 对照。
 
 ### 2. 根据 CSV 建立或补充项目
 
-如果用户提供的是新的设计空间 CSV，创建项目：
+**已有项目文件夹（例如实验室自己的项目目录）**：不要复制，直接注册，TRACE 在原位置读写：
+
+```powershell
+python trace-collab-skill\scripts\trace_lab_api.py register D:\lab\my_project --format summary
+```
+
+注册前会自动检查；检查不通过时不会注册，并返回原因。来自其他 TRACE 版本的 `project.yaml` 如果有本版本不认识的设置（例如 `searching_strategy`），用 `--drop-config-key searching_strategy` 去掉（原文件会备份到 `_backups/`）。`unregister <handle>` 只取消注册，不会删除文件。
+
+**新项目**：用一次 `create` 上传全部内容，任何一部分出错都不会留下半成品项目：
 
 ```powershell
 python trace-collab-skill\scripts\trace_lab_api.py create my_project `
   --design-csv design_space.csv `
+  --descriptor Additive formula_input additive_descriptors.csv `
+  --descriptor Solvent solvent solvent_descriptors.csv `
+  --alias Additive "CeCl3·7H2O" CeCl3 `
+  --planner-use-descriptors `
+  --observations-csv historical.csv `
+  --evidence evidence_cards.jsonl `
   --objective-name yield `
-  --planner-name atlas `
+  --planner-name chunked_gp `
   --controller-mode agentic `
   --batch-size 6 `
   --pretty
 ```
+
+- `--descriptor 变量 值列 CSV`：每个选项一行的描述符表。选项名必须完全一致；拼写不同时用 `--alias 变量 设计空间选项 表中名称` 明确对应，不做模糊匹配。有选项找不到对应行、选项之间描述符完全相同、或没有数值列时，创建会失败并说明原因。
+- 大设计空间（超过约 10 万种组合）用 `--planner-name chunked_gp`；Atlas 在大空间上可能跑很久甚至跑不完。
+- 证据卡会严格校验：`card_id` 重复、`summary` 为空、`mapping_status` 不在允许列表内都会报错，而不是悄悄改成 `background`。
+
+已有项目后补充描述符或证据卡：
+
+```powershell
+python trace-collab-skill\scripts\trace_lab_api.py descriptors my_project --variable Additive --value-column formula_input --csv additive_descriptors.csv --alias "CeCl3·7H2O=CeCl3"
+python trace-collab-skill\scripts\trace_lab_api.py import-evidence my_project --file evidence_cards.jsonl --mode append
+```
+
+两者都会先把原文件备份到 `_backups/`。
 
 如果用户提供的是历史实验 CSV，在第一次推荐前导入：
 
@@ -88,9 +123,6 @@ python trace-collab-skill\scripts\trace_lab_api.py import-observations my_projec
 
 ```powershell
 python trace-collab-skill\scripts\trace_lab_api.py ask my_project `
-  --batch-size 6 `
-  --planner-name atlas `
-  --controller-mode agentic `
   --format json `
   --pretty > ask_response.json
 ```
@@ -99,14 +131,19 @@ python trace-collab-skill\scripts\trace_lab_api.py ask my_project `
 
 ```powershell
 python trace-collab-skill\scripts\trace_lab_api.py next my_project `
-  --batch-size 6 `
-  --planner-name atlas `
-  --controller-mode agentic `
   --format json `
   --pretty > next_response.json
 ```
 
+不传 `--planner-name`、`--controller-mode`、`--batch-size` 时使用项目 `project.yaml` 里的设置；只有用户明确要求本轮临时改变时才传。长期修改设置用 `config`（见命令速查）。
+
 `agentic` 模式需要运行环境中有 `OPENAI_API_KEY` 和可用模型配置；无 LLM 或调试时使用 `--controller-mode bo_only`。
+
+推荐结果里的提示必须转告用户：
+
+- `WARNING: planner fallback`：优化器失败，本批是随机候选，不是贝叶斯优化推荐。
+- `NOTE: ...`：规划器提示，例如冷启动随机初始设计、超大空间抽样。
+- 使用 `ei_ucb` 时，`proposed_by` 说明每条推荐来自 EI、UCB 还是两者。
 
 如果用户只是说“继续下一轮”“做第二轮推荐”或类似表达，但还没有提供上一轮实验结果，不能直接运行 `next`；必须先执行第 5 步，引导用户补充结果并生成 results CSV。
 
@@ -228,9 +265,15 @@ python trace-collab-skill\scripts\trace_lab_api.py tell my_project `
 ## 脚本命令速查
 
 - `health`：检查 API。
-- `projects`：列出项目。
+- `projects`：列出项目（加 `--format summary` 显示 handle 表格）。
 - `summary <project_id>`：项目摘要。
-- `create <project_id> --design-csv design.csv`：根据设计空间 CSV 创建项目。
+- `check <project_id>` 或 `check --path <绝对路径>`：检查项目文件是否一致。
+- `register <绝对路径> [--handle 名称] [--drop-config-key 键]`：在原位置注册已有项目文件夹。
+- `unregister <project_id>`：取消注册（不删除文件）。
+- `create <project_id> --design-csv design.csv [--descriptor ...] [--observations-csv ...] [--evidence ...]`：一次上传创建项目，全部成功才生效。
+- `descriptors <project_id> --variable V --value-column C --csv F [--alias A=B] [--replace]`：给一个变量补充描述符表。
+- `import-evidence <project_id> --file cards.jsonl|cards.csv [--mode append|replace]`：导入证据卡。
+- `config <project_id> [--set KEY=VALUE]`：查看或修改项目设置，例如 `--set planner_options.chunked_gp.min_changed_variables=3`。
 - `import-observations <project_id> --rows-csv historical.csv`：导入历史实验。
 - `ask <project_id>`：生成第一轮或当前轮候选推荐。
 - `next <project_id>`：在上一轮结果完成后生成下一轮候选。
@@ -255,7 +298,10 @@ python trace-collab-skill\scripts\trace_lab_api.py trace my_project round_001 --
 
 ## 常见问题处理
 
+- `HTTP 409 ... ask is running`：同一项目正在生成推荐。不要立即重试，等当前请求完成后用 `recommendations` 查看结果。
+- `planner_use_descriptors is true, but descriptor features can't be used`：描述符有重复（报错会列出完全相同的选项，例如 `KCl = KBr`）或缺失。修正描述符表后用 `descriptors ... --replace` 重新导入；确实不用描述符时 `config <project_id> --set planner_use_descriptors=false`。
 - `LLM agent unavailable for stagnation_diagnosis`：运行中的进程或容器没有可用 `OPENAI_API_KEY`，或 agent 构建失败。用 `--env-file .env` 重启 Docker；不使用 LLM 时改用 `controller_mode=bo_only`。
+- 网关返回 `GR_UPSTREAM_REJECTED`：`gpt-6-luna` 不接受 `temperature`，确认 `agent_bo.yaml` 中没有 `temperature` 设置。
 - 兼容 OpenAI 的中转接口失败：检查 `OPENAI_BASE_URL` 是否需要 `/v1` 后缀，并确认 `configs/agent_bo.yaml` 中模型名可被该网关识别。
 - Windows 安装 `matter-golem` 失败：使用 Docker/Linux；本机 Windows 可跳过该依赖。
 - 本机提示 `ModuleNotFoundError: olympus`：设置 `PYTHONPATH` 包含 `third_party/atlas/src` 和 `third_party/olympus/src`，或直接使用 Docker。

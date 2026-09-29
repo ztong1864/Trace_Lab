@@ -49,7 +49,7 @@ def main() -> int:
     ask.add_argument("project_id")
     ask.add_argument("--batch-size", type=int)
     ask.add_argument("--planner-name")
-    ask.add_argument("--controller-mode", choices=["agentic", "bo_only"], default="agentic")
+    ask.add_argument("--controller-mode", choices=["agentic", "bo_only"], help="Default: the project's setting.")
     ask.add_argument("--agent-config-path")
     ask.add_argument("--planner-use-descriptors", choices=["true", "false"])
     ask.add_argument("--allow-pending", action="store_true")
@@ -85,7 +85,7 @@ def main() -> int:
     next_batch.add_argument("project_id")
     next_batch.add_argument("--batch-size", type=int)
     next_batch.add_argument("--planner-name")
-    next_batch.add_argument("--controller-mode", choices=["agentic", "bo_only"], default="agentic")
+    next_batch.add_argument("--controller-mode", choices=["agentic", "bo_only"], help="Default: the project's setting.")
     next_batch.add_argument("--planner-use-descriptors", choices=["true", "false"])
 
     create = sub.add_parser("create")
@@ -93,10 +93,65 @@ def main() -> int:
     create.add_argument("project_id")
     create.add_argument("--design-csv", required=True)
     create.add_argument("--objective-name", default="yield")
-    create.add_argument("--planner-name", default="atlas")
+    create.add_argument("--planner-name", default="chunked_gp")
+    create.add_argument("--acquisition-function", choices=["ei", "ucb", "ei_ucb"])
     create.add_argument("--controller-mode", choices=["agentic", "bo_only"], default="agentic")
     create.add_argument("--batch-size", type=int, default=6)
+    create.add_argument("--planner-use-descriptors", action="store_true")
+    create.add_argument(
+        "--descriptor",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("VARIABLE", "VALUE_COLUMN", "CSV"),
+        help="Descriptor table for one variable (one row per option); repeatable.",
+    )
+    create.add_argument(
+        "--alias",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("VARIABLE", "OPTION", "TABLE_VALUE"),
+        help="Match a design option to a differently spelled descriptor-table row; repeatable.",
+    )
+    create.add_argument("--observations-csv", help="Historical results to import with the project.")
+    create.add_argument("--evidence", help="Evidence cards (.jsonl or .csv) to import with the project.")
     create.add_argument("--overwrite", action="store_true")
+
+    register = sub.add_parser("register", help="Use an existing project folder on the server's disk, in place.")
+    subparsers.append(register)
+    register.add_argument("path", help="Absolute folder path on the server.")
+    register.add_argument("--handle", help="Handle to use (default: the folder name).")
+    register.add_argument(
+        "--drop-config-key",
+        action="append",
+        default=[],
+        help="Unknown project.yaml setting to remove (backed up first); repeatable.",
+    )
+
+    unregister = sub.add_parser("unregister", help="Forget a registered project (its files are untouched).")
+    subparsers.append(unregister)
+    unregister.add_argument("project_id")
+
+    check = sub.add_parser("check", help="Check a project, or a folder on the server with --path.")
+    subparsers.append(check)
+    check.add_argument("project_id", nargs="?")
+    check.add_argument("--path", help="Absolute folder path on the server (instead of a handle).")
+
+    descriptors = sub.add_parser("descriptors", help="Attach a descriptor table to one design variable.")
+    subparsers.append(descriptors)
+    descriptors.add_argument("project_id")
+    descriptors.add_argument("--variable", required=True)
+    descriptors.add_argument("--value-column", required=True)
+    descriptors.add_argument("--csv", required=True)
+    descriptors.add_argument("--alias", action="append", default=[], metavar="OPTION=TABLE_VALUE")
+    descriptors.add_argument("--replace", action="store_true")
+
+    import_evidence = sub.add_parser("import-evidence", help="Add or replace evidence cards (.jsonl or .csv).")
+    subparsers.append(import_evidence)
+    import_evidence.add_argument("project_id")
+    import_evidence.add_argument("--file", required=True)
+    import_evidence.add_argument("--mode", choices=["append", "replace"], default="append")
 
     config = sub.add_parser("config", help="Show or change a project's settings (project.yaml).")
     subparsers.append(config)
@@ -196,23 +251,42 @@ def dispatch(args: argparse.Namespace, base_url: str) -> Any:
             {"backup": not args.no_backup, "keep_historical": bool(args.keep_historical)},
         )
     if command == "create":
-        design_records = read_csv_rows(args.design_csv)
+        return request_json(base_url, "POST", "/api/projects", create_payload(args))
+    if command == "register":
         return request_json(
             base_url,
             "POST",
-            "/api/projects",
+            "/api/projects/register",
+            {"path": args.path, "handle": args.handle, "drop_config_keys": args.drop_config_key},
+        )
+    if command == "unregister":
+        return request_json(base_url, "DELETE", f"/api/projects/{q(args.project_id)}/registration")
+    if command == "check":
+        if bool(args.project_id) == bool(args.path):
+            raise ValueError("Give a project handle or --path, not both.")
+        if args.path:
+            return request_json(base_url, "POST", "/api/projects/check", {"path": args.path})
+        return request_json(base_url, "GET", f"/api/projects/{q(args.project_id)}/check")
+    if command == "descriptors":
+        return request_json(
+            base_url,
+            "POST",
+            f"/api/projects/{q(args.project_id)}/descriptors",
             {
-                "project_id": args.project_id,
-                "config": {
-                    "project_id": args.project_id,
-                    "objective_name": args.objective_name,
-                    "planner_name": args.planner_name,
-                    "controller_mode": args.controller_mode,
-                    "batch_size": args.batch_size,
-                },
-                "design_records": design_records,
-                "overwrite": bool(args.overwrite),
+                "variable": args.variable,
+                "value_column": args.value_column,
+                "csv": read_text(args.csv),
+                "aliases": parse_aliases(args.alias),
+                "replace": bool(args.replace),
             },
+        )
+    if command == "import-evidence":
+        key = "csv" if Path(args.file).suffix.lower() == ".csv" else "jsonl"
+        return request_json(
+            base_url,
+            "POST",
+            f"/api/projects/{q(args.project_id)}/evidence/import",
+            {key: read_text(args.file), "mode": args.mode},
         )
     if command == "config":
         updates = parse_config_settings(args.settings, args.settings_json)
@@ -220,6 +294,61 @@ def dispatch(args: argparse.Namespace, base_url: str) -> Any:
             return request_json(base_url, "GET", f"/api/projects/{q(args.project_id)}").get("project", {})
         return request_json(base_url, "PATCH", f"/api/projects/{q(args.project_id)}/config", updates)
     raise ValueError(f"Unsupported command: {command}")
+
+
+def create_payload(args: argparse.Namespace) -> dict[str, Any]:
+    """POST /api/projects body: design CSV plus optional descriptor tables, results and evidence."""
+    config: dict[str, Any] = {
+        "project_id": args.project_id,
+        "objective_name": args.objective_name,
+        "planner_name": args.planner_name,
+        "controller_mode": args.controller_mode,
+        "batch_size": args.batch_size,
+        "planner_use_descriptors": bool(args.planner_use_descriptors),
+    }
+    if args.acquisition_function:
+        config["acquisition_function"] = args.acquisition_function
+    aliases: dict[str, dict[str, str]] = {}
+    for variable, option, table_value in args.alias:
+        aliases.setdefault(variable, {})[option] = table_value
+    unknown = sorted(set(aliases) - {variable for variable, _, _ in args.descriptor})
+    if unknown:
+        raise ValueError(f"--alias given for variables without a --descriptor table: {unknown}.")
+    payload: dict[str, Any] = {
+        "project_id": args.project_id,
+        "config": config,
+        "design_csv": read_text(args.design_csv),
+        "descriptor_tables": [
+            {
+                "variable": variable,
+                "value_column": value_column,
+                "csv": read_text(path),
+                "aliases": aliases.get(variable, {}),
+            }
+            for variable, value_column, path in args.descriptor
+        ],
+        "overwrite": bool(args.overwrite),
+    }
+    if args.observations_csv:
+        payload["observations_csv"] = read_text(args.observations_csv)
+    if args.evidence:
+        key = "evidence_csv" if Path(args.evidence).suffix.lower() == ".csv" else "evidence_jsonl"
+        payload[key] = read_text(args.evidence)
+    return payload
+
+
+def parse_aliases(items: list[str]) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for item in items:
+        option, sep, table_value = item.partition("=")
+        if not sep or not option.strip():
+            raise ValueError(f"--alias expects OPTION=TABLE_VALUE, got `{item}`.")
+        aliases[option.strip()] = table_value.strip()
+    return aliases
+
+
+def read_text(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8-sig")
 
 
 def parse_config_settings(settings: list[str], settings_json: str | None) -> dict[str, Any]:
@@ -251,7 +380,8 @@ def ask(base_url: str, args: argparse.Namespace) -> Any:
         payload["batch_size"] = args.batch_size
     if getattr(args, "planner_name", None):
         payload["planner_name"] = args.planner_name
-    payload["controller_mode"] = getattr(args, "controller_mode", None) or "agentic"
+    if getattr(args, "controller_mode", None):
+        payload["controller_mode"] = args.controller_mode
     if getattr(args, "agent_config_path", None):
         payload["agent_config_path"] = args.agent_config_path
     if getattr(args, "planner_use_descriptors", None) is not None:
@@ -348,7 +478,57 @@ def format_summary(data: Any, *, command: str) -> str:
         if not batches:
             return "No recommendation batches."
         return format_recommendations(batches[-1])
+    if command == "check":
+        return format_check(data)
+    if command == "register":
+        header = f"Registered `{data.get('handle', '')}` -> {data.get('project_dir', '')}"
+        return header + "\n" + format_check(data.get("check") or {})
+    if command == "projects":
+        return format_projects(data)
     return ""
+
+
+def format_check(report: dict[str, Any]) -> str:
+    errors = report.get("errors") or []
+    warnings = report.get("warnings") or []
+    status = "OK" if report.get("ok") else "FAILED"
+    lines = [f"Check: {status} ({len(errors)} error(s), {len(warnings)} warning(s))"]
+    for kind, items in (("ERROR", errors), ("WARNING", warnings)):
+        for item in items:
+            where = item.get("file", "") + (f" line {item['line']}" if item.get("line") else "")
+            lines.append(f"{kind}: {where}: {single_line(item.get('message', ''))}")
+    facts = report.get("facts") or {}
+    shown = (
+        "combination_count",
+        "observation_count",
+        "completed_observation_count",
+        "recommendation_rounds",
+        "pending_recommendation_count",
+        "evidence_card_count",
+    )
+    if facts:
+        lines.append("Facts: " + ", ".join(f"{key}={facts[key]}" for key in shown if key in facts))
+    return "\n".join(lines)
+
+
+def format_projects(data: dict[str, Any]) -> str:
+    rows = []
+    for item in data.get("projects") or []:
+        project = item.get("project") or {}
+        rows.append(
+            [
+                str(item.get("handle", "")),
+                "yes" if item.get("registered") else "no",
+                str(project.get("project_id", "")),
+                str(item.get("observation_count", "")),
+                str(item.get("pending_recommendation_count", "")),
+                single_line(item.get("error", "")),
+            ]
+        )
+    if not rows:
+        return "No projects."
+    headers = ["handle", "registered", "project_id", "observations", "pending", "problem"]
+    return "\n".join(markdown_table(headers, rows))
 
 
 def format_recommendations(data: dict[str, Any]) -> str:

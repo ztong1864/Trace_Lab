@@ -446,3 +446,42 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+.project-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.project-list .project-item {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  background: var(--soft);
+}
+
+.project-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.project-item .project-problem,
+.check-failed,
+.check-errors {
+  color: var(--danger);
+}
+
+.check-ok {
+  color: var(--green);
+}
+
+.check-result ul {
+  margin: 4px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.check-warnings {
+  color: var(--muted);
+}

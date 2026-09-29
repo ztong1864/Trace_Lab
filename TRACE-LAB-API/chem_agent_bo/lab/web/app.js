@@ -11,6 +11,7 @@ let uiState = {
 const actionButtons = [
   "#loadProject",
   "#refreshProjects",
+  "#checkProject",
   "#askButton",
   "#reloadRecommendations",
   "#reloadObservations",
@@ -34,9 +35,21 @@ async function api(path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.detail || `Request failed: ${response.status}`);
+    throw new Error(detailText(data.detail) || `Request failed: ${response.status}`);
   }
   return data;
+}
+
+function detailText(detail) {
+  // Structured errors carry a message plus a report (check, descriptor table, evidence problems).
+  if (!detail || typeof detail === "string") return detail || "";
+  const parts = [detail.message || ""];
+  const problems = [
+    ...(detail.check?.errors || []).map((item) => `${item.file}${item.line ? ` line ${item.line}` : ""}: ${item.message}`),
+    ...(detail.problems || []),
+  ];
+  if (problems.length) parts.push(problems.slice(0, 5).join(" | ") + (problems.length > 5 ? ` | ... (${problems.length} total)` : ""));
+  return parts.filter(Boolean).join(" ");
 }
 
 function projectId() {
@@ -128,6 +141,7 @@ function updateControls() {
 
   setDisabled("#loadProject", busy || !id);
   setDisabled("#refreshProjects", busy);
+  setDisabled("#checkProject", busy || !id);
   setDisabled(
     "#askButton",
     busy || !loaded || pending,
@@ -849,12 +863,80 @@ async function refreshProjects() {
   return withUiLock("Loading project list...", async () => {
     try {
       const data = await api("/api/projects");
-      const ids = (data.projects || []).map((item) => item.project?.project_id).filter(Boolean);
-      setStatus(ids.length ? `Projects: ${ids.join(", ")}` : "No projects found.");
+      renderProjectList(data.projects || []);
+      setStatus(data.projects?.length ? `${data.projects.length} project(s). Click one to load it.` : "No projects found.");
     } catch (error) {
       setStatus(error.message, true);
     }
   });
+}
+
+function renderProjectList(projects) {
+  // Projects are addressed by handle (folder name or registered name), not by project_id.
+  const node = $("#projectList");
+  node.innerHTML = projects
+    .map((item) => {
+      const projectIdText = item.project?.project_id && item.project.project_id !== item.handle ? item.project.project_id : "";
+      const details = [
+        item.registered ? "registered" : "",
+        projectIdText ? `id ${projectIdText}` : "",
+        item.observation_count !== undefined ? `${item.observation_count} obs` : "",
+        item.pending_recommendation_count ? `${item.pending_recommendation_count} pending` : "",
+      ].filter(Boolean);
+      const problem = item.error ? `<span class="project-problem">${escapeHtml(item.error)}</span>` : "";
+      return `<button class="project-item" data-handle="${escapeHtml(item.handle)}" ${item.available === false ? "disabled" : ""}>
+        <strong>${escapeHtml(item.handle)}</strong>
+        <span>${escapeHtml(details.join(" · "))}</span>${problem}
+      </button>`;
+    })
+    .join("");
+  node.querySelectorAll(".project-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("#projectId").value = button.dataset.handle;
+      $("#checkResult").innerHTML = "";
+      loadProject();
+    });
+  });
+}
+
+async function checkProject() {
+  const id = projectId();
+  if (!id) return setStatus("Project ID is required.", true);
+  return withUiLock("Checking project...", async () => {
+    try {
+      const report = await api(`/api/projects/${encodeURIComponent(id)}/check`);
+      renderCheck(report);
+      setStatus(report.ok ? "Check passed." : `Check found ${report.errors.length} error(s).`, !report.ok);
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+}
+
+function renderCheck(report) {
+  const line = (item) => `${escapeHtml(item.file)}${item.line ? ` line ${item.line}` : ""}: ${escapeHtml(item.message)}`;
+  const list = (items, css) =>
+    items.length ? `<ul class="${css}">${items.map((item) => `<li>${line(item)}</li>`).join("")}</ul>` : "";
+  const facts = report.facts || {};
+  const factText = [
+    ["combinations", facts.combination_count],
+    ["observations", facts.observation_count],
+    ["completed", facts.completed_observation_count],
+    ["rounds", facts.recommendation_rounds],
+    ["pending", facts.pending_recommendation_count],
+    ["evidence cards", facts.evidence_card_count],
+  ]
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([label, value]) => `${label}: ${Number(value).toLocaleString()}`)
+    .join(" · ");
+  $("#checkResult").innerHTML = `
+    <p class="${report.ok ? "check-ok" : "check-failed"}">
+      <strong>${report.ok ? "Check passed" : "Check failed"}</strong>
+      (${report.errors.length} error(s), ${report.warnings.length} warning(s))
+    </p>
+    ${list(report.errors, "check-errors")}
+    ${list(report.warnings, "check-warnings")}
+    <p class="hint">${escapeHtml(factText)}</p>`;
 }
 
 async function createProjectFromCsv() {
@@ -960,6 +1042,7 @@ function truncateText(value, limit) {
 
 $("#loadProject").addEventListener("click", loadProject);
 $("#refreshProjects").addEventListener("click", refreshProjects);
+$("#checkProject").addEventListener("click", checkProject);
 $("#askButton").addEventListener("click", askBatch);
 $("#reloadRecommendations").addEventListener("click", reloadRecommendations);
 $("#exportRecommendations").addEventListener("click", exportRecommendationsCsv);
