@@ -80,7 +80,9 @@ name six or seven, and may never be shown. Setting `evidence_selection: per_vari
 (`config --set evidence_selection=per_variable`, `PATCH /config`, or the web agent's
 `update_project_config`) first gives each optimized variable its most specific eligible
 card (mapping status first, then the card naming the fewest optimized variables, then
-confidence), then fills the remaining places by score. Because specificity outranks
+confidence), then fills the remaining places by score. Each variable prefers a card no other
+variable has taken, so a single broad card cannot occupy every place; it is reused only for a
+variable it is the sole candidate of. Because specificity outranks
 confidence there, use it only once the chemist has confirmed the `confidence` and
 `variable_scope` of the reviewed cards. It needs `knowledge_top_k` (orchestrator) and
 `decision_engine_knowledge_max_items` (prompt) in the agent config to be at least the

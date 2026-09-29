@@ -907,8 +907,23 @@ class SelectionModeTests(unittest.TestCase):
         store = self._store(
             _card("broad_family", variable_scope=["A", "B", "C"], mapping_status="same_reaction_family"),
             _card("spec_variable_level", variable_scope=["A"], mapping_status="variable_level"),
+            _card("spec_b", variable_scope=["B"], mapping_status="same_reaction_family"),
+            _card("spec_c", variable_scope=["C"], mapping_status="same_reaction_family"),
         )
-        self.assertEqual(self._ids(store)[0], "broad_family")
+        # A is contested by both; neither is otherwise forced, so the stronger status takes the slot.
+        explained = {item["card_id"]: item for item in store.explain(variables=self.variables, selection="per_variable")}
+        self.assertEqual(explained["broad_family"]["slots"], ["A"])
+        self.assertEqual(explained["spec_variable_level"]["slots"], [], "it only tops up")
+
+    def test_a_specific_card_takes_over_when_the_broad_one_is_needed_elsewhere(self):
+        store = self._store(
+            _card("broad_family", variable_scope=["A", "B", "C"], mapping_status="same_reaction_family"),
+            _card("spec_variable_level", variable_scope=["A"], mapping_status="variable_level"),
+        )
+        # B and C have no other card, so broad_family must serve them; A then goes to its own card.
+        explained = {item["card_id"]: item for item in store.explain(variables=self.variables, selection="per_variable")}
+        self.assertEqual(explained["broad_family"]["slots"], ["B", "C"])
+        self.assertEqual(explained["spec_variable_level"]["slots"], ["A"])
 
     def test_confidence_breaks_a_tie_between_equally_specific_cards(self):
         store = self._store(
@@ -923,6 +938,37 @@ class SelectionModeTests(unittest.TestCase):
         self.assertEqual(explained["ab"]["slots"], ["A", "B"])
         self.assertEqual(explained["c"]["slots"], ["C"])
         self.assertEqual(self._ids(store), ["ab", "c"])
+
+    def test_a_broad_top_status_card_cannot_take_every_slot(self):
+        """The chemist's project: one same_start_end card names every variable; it must not shut the rest out."""
+        store = self._store(
+            _card("broad_direct", variable_scope=["A", "B", "C"], mapping_status="same_start_end", confidence="0.97"),
+            _card("spec_a", variable_scope=["A"]),
+            _card("spec_b", variable_scope=["B"]),
+            _card("spec_c", variable_scope=["C"]),
+        )
+        explained = {item["card_id"]: item for item in store.explain(variables=self.variables, selection="per_variable")}
+        self.assertEqual(explained["broad_direct"]["slots"], ["A"])
+        self.assertEqual(explained["spec_b"]["slots"], ["B"])
+        self.assertEqual(explained["spec_c"]["slots"], ["C"])
+        self.assertEqual(self._ids(store), ["broad_direct", "spec_b", "spec_c", "spec_a"])
+
+    def test_a_variable_with_only_one_candidate_chooses_before_the_others(self):
+        store = self._store(
+            _card("x", variable_scope=["A", "B"], mapping_status="same_reaction_family"),
+            _card("y", variable_scope=["B"], mapping_status="variable_level"),
+        )
+        # Design order puts B first, and B would take x on status; A has no other card, so A chooses first.
+        explained = {
+            item["card_id"]: item for item in store.explain(variables=["B", "A"], selection="per_variable")
+        }
+        self.assertEqual(explained["x"]["slots"], ["A"])
+        self.assertEqual(explained["y"]["slots"], ["B"])
+
+    def test_a_card_is_reused_only_where_it_is_the_sole_candidate(self):
+        store = self._store(_card("only", variable_scope=["A", "B"]), _card("other", variable_scope=["C"]))
+        explained = {item["card_id"]: item for item in store.explain(variables=self.variables, selection="per_variable")}
+        self.assertEqual(explained["only"]["slots"], ["A", "B"])
 
     def test_cards_that_fill_no_slot_follow_in_score_order(self):
         store = self._store(

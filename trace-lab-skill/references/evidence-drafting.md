@@ -74,7 +74,7 @@ evidence-preview   看控制器实际会看到哪几张卡                      
 
 控制器每次 `ask` 只取得分最高的前几张卡（`knowledge_top_k`，默认 5），整次 ask 的所有节点共用这一组。默认的 `score` 排序大致是 `状态分 + 10×置信度 + 4×涉及的设计变量数 + 3×命中的节点数`，所以**只涉及 1–2 个变量的精确卡片，很难排进前 5**，项目里已有涉及 6–7 个变量的宽泛卡片时尤其如此。不要为了排名靠前把 `variable_scope` 写宽——那会让卡片说得比论文更多。
 
-项目设置 `evidence_selection` 可以改成 `per_variable`：先给每个被优化的变量选一张“最专门”的卡（先比映射状态，再比涉及的变量数少者优先，再比置信度），剩余名额再按得分补齐。用 `update_project_config` 或 `config --set evidence_selection=per_variable` 切换，默认 `score` 不变。每个变量一张卡需要 `knowledge_top_k` 和 `decision_engine_knowledge_max_items`（智能体配置里）至少等于变量数，`evidence-preview` 会在不够时提醒。因为专门程度会压过置信度，切换前请让研究者确认审阅表里的 `confidence` 和 `variable_scope` 是如实填的。
+项目设置 `evidence_selection` 可以改成 `per_variable`：先给每个被优化的变量选一张“最专门”的卡（先比映射状态，再比涉及的变量数少者优先，再比置信度），剩余名额再按得分补齐；每个变量优先选别的变量没选过的卡，一张宽泛的卡只在它是某变量唯一候选时才重复使用，所以不会独占所有名额。用 `update_project_config` 或 `config --set evidence_selection=per_variable` 切换，默认 `score` 不变。每个变量一张卡需要 `knowledge_top_k` 和 `decision_engine_knowledge_max_items`（智能体配置里）至少等于变量数，`evidence-preview` 会在不够时提醒。因为专门程度会压过置信度，切换前请让研究者确认审阅表里的 `confidence` 和 `variable_scope` 是如实填的。
 
 ### 智能体实际读到什么
 

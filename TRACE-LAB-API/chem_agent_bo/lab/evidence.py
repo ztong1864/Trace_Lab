@@ -202,10 +202,13 @@ class EvidenceStore:
     ) -> tuple[list[int], dict[int, list[str]]]:
         """Card indexes in retrieval order (every eligible card, best first), plus the variable slots.
 
-        `score` is score descending, then file order. `per_variable` puts first, in design
-        order, the card that suits each optimized variable best: mapping status first, then the
-        card naming the fewest optimized variables (the most specific), then confidence, then
-        file order. One card may fill several slots. Everything else follows in score order.
+        `score` is score descending, then file order. `per_variable` puts first the card that
+        suits each optimized variable best: mapping status first, then the card naming the fewest
+        optimized variables (the most specific), then confidence, then file order. Each variable
+        prefers a card no other variable has taken, so one broad card cannot occupy every slot;
+        it is reused only where it is the variable's sole candidate. Variables with the fewest
+        candidate cards choose first. The chosen cards are listed in design order; everything
+        else follows in score order.
         """
         mode = str(selection or "score").strip().lower()
         if mode not in SELECTION_MODES:
@@ -215,14 +218,19 @@ class EvidenceStore:
             return by_score, {}
         optimized = {_norm(name) for name in variables}
         scope_of = {index: {_norm(name) for name in self.cards[index].variable_scope} for index in by_score}
+        candidates_of = {
+            name: [index for index in by_score if _norm(name) in scope_of[index]] for name in variables
+        }
+        design_position = {name: position for position, name in enumerate(variables)}
         chosen: list[int] = []
         slots: dict[int, list[str]] = {}
-        for name in variables:
-            candidates = [index for index in by_score if _norm(name) in scope_of[index]]
+        for name in sorted(variables, key=lambda item: (len(candidates_of[item]), design_position[item])):
+            candidates = candidates_of[name]
             if not candidates:
                 continue
+            fresh = [index for index in candidates if index not in chosen] or candidates
             best = min(
-                candidates,
+                fresh,
                 key=lambda index: (
                     -MAPPING_PRIORITY.get(self.cards[index].mapping_status, 0),
                     len(scope_of[index] & optimized),
@@ -233,6 +241,9 @@ class EvidenceStore:
             slots.setdefault(best, []).append(name)
             if best not in chosen:
                 chosen.append(best)
+        for names in slots.values():
+            names.sort(key=design_position.__getitem__)
+        chosen.sort(key=lambda index: design_position[slots[index][0]])
         return chosen + [index for index in by_score if index not in chosen], slots
 
     @staticmethod
