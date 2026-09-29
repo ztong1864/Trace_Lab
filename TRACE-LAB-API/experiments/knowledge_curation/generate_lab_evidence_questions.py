@@ -1,5 +1,10 @@
 #!/usr/bin/env python
-"""Generate lab-specific evidence extraction questions."""
+"""Generate lab-specific evidence extraction questions.
+
+SUPERSEDED: keyword-based pilot. Use the workflow in docs/collaborator_evidence_workflow.md
+(experiments/run_lab_bo.py evidence-prepare / evidence-verify / evidence-sheet / evidence-accept),
+which checks quotes against the paper and imports with strict validation and a backup.
+"""
 
 from __future__ import annotations
 

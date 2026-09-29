@@ -153,6 +153,13 @@ def main() -> int:
     import_evidence.add_argument("--file", required=True)
     import_evidence.add_argument("--mode", choices=["append", "replace"], default="append")
 
+    evidence_preview = sub.add_parser(
+        "evidence-preview",
+        help="Show which evidence cards the controller would be shown, and why the others never are.",
+    )
+    subparsers.append(evidence_preview)
+    evidence_preview.add_argument("project_id")
+
     config = sub.add_parser("config", help="Show or change a project's settings (project.yaml).")
     subparsers.append(config)
     config.add_argument("project_id")
@@ -288,6 +295,8 @@ def dispatch(args: argparse.Namespace, base_url: str) -> Any:
             f"/api/projects/{q(args.project_id)}/evidence/import",
             {key: read_text(args.file), "mode": args.mode},
         )
+    if command == "evidence-preview":
+        return request_json(base_url, "GET", f"/api/projects/{q(args.project_id)}/evidence/preview")
     if command == "config":
         updates = parse_config_settings(args.settings, args.settings_json)
         if not updates:
@@ -485,6 +494,8 @@ def format_summary(data: Any, *, command: str) -> str:
         return header + "\n" + format_check(data.get("check") or {})
     if command == "projects":
         return format_projects(data)
+    if command == "evidence-preview":
+        return format_evidence_preview(data)
     return ""
 
 
@@ -508,6 +519,30 @@ def format_check(report: dict[str, Any]) -> str:
     )
     if facts:
         lines.append("Facts: " + ", ".join(f"{key}={facts[key]}" for key in shown if key in facts))
+    return "\n".join(lines)
+
+
+def format_evidence_preview(data: dict[str, Any]) -> str:
+    shown = data.get("retrieved") or []
+    lines = [
+        f"{data.get('card_count', 0)} card(s); each ask shows the top {data.get('top_k', '?')} to the controller "
+        "(one fixed set, used by every node)."
+    ]
+    if shown:
+        lines.extend(
+            markdown_table(
+                ["rank", "score", "mapping_status", "card_id"],
+                [[str(item["rank"]), str(item["score"]), item["mapping_status"], item["card_id"]] for item in shown],
+            )
+        )
+    not_shown = data.get("not_shown") or []
+    if not_shown:
+        lines.append(
+            f"Eligible but not shown: {len(not_shown)} card(s); the best of them ranks "
+            f"{not_shown[0]['rank']} with score {not_shown[0]['score']}."
+        )
+    for item in data.get("never_retrieved") or []:
+        lines.append(f"Never shown: {item['card_id']} ({item['mapping_status']}): {item.get('reason_text', '')}")
     return "\n".join(lines)
 
 

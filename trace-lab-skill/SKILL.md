@@ -108,6 +108,29 @@ python trace-collab-skill\scripts\trace_lab_api.py import-evidence my_project --
 
 两者都会先把原文件备份到 `_backups/`。
 
+### 从已有论文起草证据卡
+
+用户有 PDF 论文、想把它们变成证据卡时，读 `references/evidence-drafting.md`，按里面的流程做。分工是：TRACE 的代码负责提取文字、核对引文和数字、生成审阅表、导入；**agent 负责逐字引用并如实概括**；**是否采用由化学研究者在审阅表里决定**，agent 不替他们判断“论文是否和项目同一个反应”。
+
+这些命令需要 PDF 在本机，从仓库的 `TRACE-LAB-API` 目录运行 `experiments/run_lab_bo.py`（需要 poppler 的 `pdftotext`；Git Bash 里通常已有）：
+
+```powershell
+python experiments\run_lab_bo.py evidence-prepare --project-dir runs\lab_projects\my_project --pdf-dir papers
+# 读 evidence_work\packets\*.txt 和 context.json，写 evidence_work\drafts\*.jsonl
+python experiments\run_lab_bo.py evidence-verify --project-dir runs\lab_projects\my_project
+python experiments\run_lab_bo.py evidence-sheet  --project-dir runs\lab_projects\my_project
+# 把 evidence_work\review_sheet.csv 交给研究者，在 decision 列填 accept / reject
+python experiments\run_lab_bo.py evidence-accept --project-dir runs\lab_projects\my_project
+python experiments\run_lab_bo.py evidence-preview --project-dir runs\lab_projects\my_project
+```
+
+注意：
+
+- `evidence-prepare` 报告 `needs_ocr` 的是扫描件，没有文字，先做 OCR，不要凭空起草。
+- `evidence-verify` 通过只说明“引文在论文里、数字在引文里”，不说明“这个产率属于这个条件”，所以审阅表把引文和 summary 并排放，让研究者对着 PDF 核对。
+- 控制器每次 ask 只取得分最高的几张卡（默认 5）。导入后必须运行 `evidence-preview`，确认新卡是否真的会被展示；只涉及 1–2 个变量的精确卡片在已有宽泛卡片的项目里通常排不进前 5。
+- 不要把审阅表里的 `decision` 替用户填上。
+
 如果用户提供的是历史实验 CSV，在第一次推荐前导入：
 
 ```powershell
@@ -273,6 +296,7 @@ python trace-collab-skill\scripts\trace_lab_api.py tell my_project `
 - `create <project_id> --design-csv design.csv [--descriptor ...] [--observations-csv ...] [--evidence ...]`：一次上传创建项目，全部成功才生效。
 - `descriptors <project_id> --variable V --value-column C --csv F [--alias A=B] [--replace]`：给一个变量补充描述符表。
 - `import-evidence <project_id> --file cards.jsonl|cards.csv [--mode append|replace]`：导入证据卡。
+- `evidence-preview <project_id>`：看控制器每次 ask 实际会拿到哪几张证据卡，以及哪些卡永远不会被展示、原因是什么。
 - `config <project_id> [--set KEY=VALUE]`：查看或修改项目设置，例如 `--set planner_options.chunked_gp.min_changed_variables=3`。
 - `import-observations <project_id> --rows-csv historical.csv`：导入历史实验。
 - `ask <project_id>`：生成第一轮或当前轮候选推荐。

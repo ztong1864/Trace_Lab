@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 """Extract lightweight question-grounded lab evidence from local PDF text.
 
+SUPERSEDED: keyword-based pilot. Use the workflow in docs/collaborator_evidence_workflow.md
+(experiments/run_lab_bo.py evidence-prepare / evidence-verify / evidence-sheet / evidence-accept),
+which checks quotes against the paper and imports with strict validation and a backup.
+
 This deterministic extractor is intended for a small pilot loop. It produces
 review-needed evidence items without calling an LLM; stronger extraction can be
 run later with extract_evidence_from_pdfs.py --mode pdf_text_llm.

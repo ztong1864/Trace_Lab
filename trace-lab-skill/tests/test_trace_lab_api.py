@@ -154,3 +154,27 @@ def test_config_sends_patch_and_shows_settings_without_changes(monkeypatch):
         ("GET", "/api/projects/demo", None),
         ("PATCH", "/api/projects/demo/config", {"seed": 11}),
     ]
+
+
+def test_evidence_preview_calls_the_endpoint_and_summarizes_it(monkeypatch):
+    preview = {
+        "card_count": 3,
+        "top_k": 1,
+        "retrieved": [{"rank": 1, "score": 79.7, "mapping_status": "same_reaction_family", "card_id": "card_a"}],
+        "not_shown": [{"rank": 2, "score": 75.8, "mapping_status": "background", "card_id": "card_b"}],
+        "never_retrieved": [
+            {"card_id": "card_c", "mapping_status": "same_start_end", "reason_text": "reaction_scope does not match."}
+        ],
+    }
+    calls = []
+    monkeypatch.setattr(
+        trace_lab_api, "request_json", lambda base_url, method, path, payload=None: calls.append((method, path)) or preview
+    )
+    data = trace_lab_api.dispatch(Namespace(command="evidence-preview", project_id="demo"), "http://x")
+    text = trace_lab_api.format_summary(data, command="evidence-preview")
+
+    assert calls == [("GET", "/api/projects/demo/evidence/preview")]
+    assert "3 card(s); each ask shows the top 1" in text
+    assert "| 1 | 79.7 | same_reaction_family | card_a |" in text
+    assert "the best of them ranks 2 with score 75.8" in text
+    assert "Never shown: card_c (same_start_end): reaction_scope does not match." in text
