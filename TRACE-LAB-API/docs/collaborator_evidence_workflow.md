@@ -70,16 +70,42 @@ whole sheet if any row has a problem or a `decision` is mistyped.
 ## Will a new card be shown? Check with `evidence-preview`
 
 Each `ask` retrieves evidence once, for all controller nodes together, and keeps the
-top few cards (`knowledge_top_k`, default 5). The score is roughly
-`status score + 10 x confidence + 4 x variables named + 3 x nodes matched`, and cards
-whose `direct` / `same_start_end` status is combined with a `reaction_scope` that is
-not contained in (or containing) the project's are dropped entirely.
+top few cards (`knowledge_top_k`, default 5). Those same cards serve every node in
+that ask.
 
-So a precise card that names one or two variables can rank well below broad cards
-that name six or seven, and may never be shown. `evidence-preview` lists the cards
-the controller gets, the best card that missed the cut and its rank, and every card
-that is screened out with the reason. `project check` also warns about cards that can
-never be retrieved.
+**Ranking.** With the default setting `evidence_selection: score`, the score is roughly
+`status score + 10 x confidence + 4 x variables named + 3 x nodes matched`. A precise
+card that names one or two variables can therefore rank well below broad cards that
+name six or seven, and may never be shown. Setting `evidence_selection: per_variable`
+(`config --set evidence_selection=per_variable`, `PATCH /config`, or the web agent's
+`update_project_config`) first gives each optimized variable its most specific eligible
+card (mapping status first, then the card naming the fewest optimized variables, then
+confidence), then fills the remaining places by score. Because specificity outranks
+confidence there, use it only once the chemist has confirmed the `confidence` and
+`variable_scope` of the reviewed cards. It needs `knowledge_top_k` (orchestrator) and
+`decision_engine_knowledge_max_items` (prompt) in the agent config to be at least the
+number of optimized variables; the preview warns when they are not.
+
+**Scope rule.** A card with `direct` / `same_start_end` status is hidden when its
+`reaction_scope` is unrelated to the project's: neither one contains the other nor do
+they share two key words (for example "oxidative" and "lactonization"). The rule reads
+words, not chemistry, so a neighbouring reaction can pass; the card's status is still
+the chemist's claim. The rank bonus for a matching scope stays strict.
+
+**What the agent reads.** The decision engine keeps only the first
+`decision_engine_knowledge_max_chars` (default 400) characters of each card, in the order
+summary, mapping status line, transferability note, excerpt, and reads at most
+`decision_engine_knowledge_max_items` (default 5) cards. The summary is the only part
+that is always seen; the note is mostly cut and the excerpt rarely visible. Put the
+finding first and keep the summary near 300 characters (`evidence-verify` warns with
+`summary_long`).
+
+`evidence-preview` shows all of this: the selection mode and limits, each retrieved
+card with the variable it was picked for, whether the agent reads it, the exact text it
+reads and how many characters are cut, the best card that missed the cut and its rank,
+every card that is screened out with the reason, and warnings (limits that do not fit,
+identical summaries taking several places). `project check` also warns about cards that
+can never be retrieved and about cards with identical summaries.
 
 ## The older scripts
 

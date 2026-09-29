@@ -48,13 +48,13 @@ evidence-preview   看控制器实际会看到哪几张卡                      
 | `finding_id` | 同一篇论文内唯一，如 `solvent_screen`；卡片编号 = `<source_id>_<finding_id>` |
 | `page` | 引文所在页（PDF 页码）；写错会被自动改正并提示 |
 | `quote` | **逐字**摘自论文，不超过 900 字符；空白、连字符、上下标差异不影响匹配。要跳过中间内容用 `[...]`，每一段都必须在同一页 |
-| `summary` | 做了什么、测到什么：底物、催化体系、溶剂、温度、产率，按论文原样写。至少 40 字符 |
+| `summary` | 做了什么、测到什么：底物、催化体系、溶剂、温度、产率，按论文原样写。至少 40 字符，**最好不超过约 300 字符，结论写在最前面**（原因见下面“智能体实际读到什么”） |
 | `variable_scope` | 这条发现涉及的设计变量，名称必须与 `context.json` 一致 |
 | `proposed_mapping_status` | 只能是 `same_reaction_family`、`variable_level`、`background`、`out_of_scope` |
 | `confidence` | 0–1 的数，或 `high` / `medium` / `low` |
 | `transferability_note` | **必填**。这篇论文的底物、规模、温度、条件与本项目有何不同，为什么不能直接照搬 |
 | `target_nodes` | 可省略；默认 `design_init_experiments`、`hypothesis_action` |
-| `reaction_scope` | 可省略。论文自己研究的反应，如 `iron/nitroxyl aerobic oxidative lactonization of 1,4-diols`（不要照抄项目的 `reaction_scope`）。研究者若把状态升为 `direct` / `same_start_end`，这个字段必须能和项目的 `reaction_scope` 互相包含，否则卡片永远不会被展示，`evidence-preview` 会指出 |
+| `reaction_scope` | 可省略。论文自己研究的反应，如 `iron/nitroxyl aerobic oxidative lactonization of 1,4-diols`（不要照抄项目的 `reaction_scope`）。研究者若把状态升为 `direct` / `same_start_end`，这个字段要么和项目的 `reaction_scope` 互相包含，要么与它至少共享两个关键词（如 `oxidative`、`lactonization`），否则卡片会被隐藏，`evidence-preview` 会指出 |
 | `source` | 可省略。完整引用（作者、期刊、年份、DOI）；省略时用文件名和 DOI |
 
 ## 规则
@@ -72,7 +72,13 @@ evidence-preview   看控制器实际会看到哪几张卡                      
 
 ## 写完之后：卡片会不会真被展示？
 
-控制器每次 `ask` 只取得分最高的前几张卡（`knowledge_top_k`，默认 5），整次 ask 的所有节点共用这一组。得分大致是 `状态分 + 10×置信度 + 4×涉及的设计变量数 + 3×命中的节点数`，所以**只涉及 1–2 个变量的精确卡片，很难排进前 5**，项目里已有涉及 6–7 个变量的宽泛卡片时尤其如此。导入后请运行 `evidence-preview` 看新卡排第几；这是检索排序的局限，不要为了排名靠前把 `variable_scope` 写宽——那会让卡片说得比论文更多。
+控制器每次 `ask` 只取得分最高的前几张卡（`knowledge_top_k`，默认 5），整次 ask 的所有节点共用这一组。默认的 `score` 排序大致是 `状态分 + 10×置信度 + 4×涉及的设计变量数 + 3×命中的节点数`，所以**只涉及 1–2 个变量的精确卡片，很难排进前 5**，项目里已有涉及 6–7 个变量的宽泛卡片时尤其如此。不要为了排名靠前把 `variable_scope` 写宽——那会让卡片说得比论文更多。
+
+项目设置 `evidence_selection` 可以改成 `per_variable`：先给每个被优化的变量选一张“最专门”的卡（先比映射状态，再比涉及的变量数少者优先，再比置信度），剩余名额再按得分补齐。用 `update_project_config` 或 `config --set evidence_selection=per_variable` 切换，默认 `score` 不变。每个变量一张卡需要 `knowledge_top_k` 和 `decision_engine_knowledge_max_items`（智能体配置里）至少等于变量数，`evidence-preview` 会在不够时提醒。因为专门程度会压过置信度，切换前请让研究者确认审阅表里的 `confidence` 和 `variable_scope` 是如实填的。
+
+### 智能体实际读到什么
+
+提示词里每张卡只保留前 `decision_engine_knowledge_max_chars`（默认 400）个字符，顺序是：`summary`、`Mapping status: … Allowed use: …`、`Transferability: …`、`Evidence excerpt: …`；而且最多读 `decision_engine_knowledge_max_items`（默认 5）张。所以**只有 summary 一定会被读到**，迁移性说明多半被截掉，摘录几乎看不到。因此：结论放在 summary 最前面，控制在约 300 字符内（`evidence-verify` 超长会给 `summary_long` 警告）；`evidence-preview` 会逐张显示“智能体读到的原文”和被截掉的字符数。不要把重要限制条件只写在 `transferability_note` 里。
 
 ## 检查结果怎么读
 

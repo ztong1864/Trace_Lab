@@ -289,6 +289,20 @@ class PrepareSourcesTests(unittest.TestCase):
         self.assertEqual(sorted(names["Solvent"]["options"]), ["dce", "meoh", "thf"])
         self.assertEqual(context["reaction_scope"], "oxidative lactonization of diols")
         self.assertEqual(context["existing_cards"][0]["card_id"], "old_1")
+        self.assertEqual(context["prompt_card_chars"], 400, "the repo's default agent config")
+
+    def test_context_takes_the_prompt_limit_from_the_projects_agent_config(self):
+        (self.project.project_dir / "agent_bo.yaml").write_text(
+            "prompt:\n  decision_engine_knowledge_max_chars: 250\n", encoding="utf-8"
+        )
+        LabBOService(projects_root=self.root).update_project_config("ev", {"agent_config_path": "agent_bo.yaml"})
+        import json
+
+        path = self.literature.write_context(self.project.project_dir)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["prompt_card_chars"], 250)
+        LabBOService(projects_root=self.root).update_project_config("ev", {"agent_config_path": "gone.yaml"})
+        path = self.literature.write_context(self.project.project_dir)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["prompt_card_chars"], 400, "unreadable -> default")
 
     def test_missing_pdftotext_is_a_clear_error(self):
         import os
@@ -518,6 +532,30 @@ class VerifyDraftTests(unittest.TestCase):
             existing_excerpts=[old_excerpt],
         )
         self.assertEqual(same_quote["status"], "duplicate")
+
+    def test_a_summary_too_long_for_the_prompt_is_warned_about(self):
+        padding = " More context that adds no new numbers." * 10
+        long = self.check(summary=_GOOD["summary"] + padding)
+        self.assertEqual(long["status"], "ok", long["errors"])
+        self.assertIn("summary_long", self.codes(long, "warnings"))
+        self.assertIn("first", next(w["message"] for w in long["warnings"] if w["code"] == "summary_long"))
+        self.assertNotIn("summary_long", self.codes(self.check(), "warnings"))
+
+    def test_the_budget_follows_the_projects_prompt_limit(self):
+        small = dict(_CONTEXT, prompt_card_chars=150)
+        record = self.lit.check_draft(
+            dict(_GOOD), texts=self.texts, context=small, taken_card_ids=set(), existing_excerpts=[]
+        )
+        self.assertIn("summary_long", self.codes(record, "warnings"), "95 characters do not fit a 150 character card")
+        roomy = dict(_CONTEXT, prompt_card_chars=900)
+        record = self.lit.check_draft(
+            dict(_GOOD, summary=_GOOD["summary"] + " Extra detail." * 30),
+            texts=self.texts,
+            context=roomy,
+            taken_card_ids=set(),
+            existing_excerpts=[],
+        )
+        self.assertNotIn("summary_long", self.codes(record, "warnings"))
 
     def test_a_source_without_text_is_rejected(self):
         record = self.lit.check_draft(

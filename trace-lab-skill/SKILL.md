@@ -128,7 +128,8 @@ python experiments\run_lab_bo.py evidence-preview --project-dir runs\lab_project
 
 - `evidence-prepare` 报告 `needs_ocr` 的是扫描件，没有文字，先做 OCR，不要凭空起草。
 - `evidence-verify` 通过只说明“引文在论文里、数字在引文里”，不说明“这个产率属于这个条件”，所以审阅表把引文和 summary 并排放，让研究者对着 PDF 核对。
-- 控制器每次 ask 只取得分最高的几张卡（默认 5）。导入后必须运行 `evidence-preview`，确认新卡是否真的会被展示；只涉及 1–2 个变量的精确卡片在已有宽泛卡片的项目里通常排不进前 5。
+- 控制器每次 ask 只取得分最高的几张卡（默认 5），且提示词里每张卡只保留前 400 字符（先 summary，迁移性说明多半被截掉）。导入后必须运行 `evidence-preview`，确认新卡是否真的会被展示、智能体实际读到的原文是什么；只涉及 1–2 个变量的精确卡片在已有宽泛卡片的项目里通常排不进前 5。
+- 项目设置 `evidence_selection` 默认 `score`；改成 `per_variable`（`config <项目> --set evidence_selection=per_variable`）会先给每个被优化的变量选一张最专门的卡，需要智能体配置里的 `knowledge_top_k` 和 `decision_engine_knowledge_max_items` 不小于变量数，`evidence-preview` 会提醒。
 - 不要把审阅表里的 `decision` 替用户填上。
 
 如果用户提供的是历史实验 CSV，在第一次推荐前导入：

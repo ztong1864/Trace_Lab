@@ -255,6 +255,7 @@ def write_context(project_dir: str | Path) -> Path:
         "reaction_scope": config.reaction_scope,
         "objective_name": config.objective_name,
         "goal": config.goal,
+        "prompt_card_chars": _prompt_card_chars(project.project_dir, config.agent_config_path),
         "variables": variables,
         "existing_cards": [
             {"card_id": card.card_id, "doi": card.doi, "source": card.source[:160]} for card in store.cards
@@ -265,6 +266,16 @@ def write_context(project_dir: str | Path) -> Path:
     path = base / "context.json"
     path.write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def _prompt_card_chars(project_dir: Path, agent_config_path: str) -> int:
+    """How many characters of each card the agent's prompt keeps, from the project's agent config."""
+    from chem_agent_bo.lab.service import _load_agentic_config  # lazy: only needed when a context is written
+
+    try:
+        return int(_load_agentic_config(agent_config_path, project_dir=project_dir).prompt.decision_engine_knowledge_max_chars)
+    except Exception:  # noqa: BLE001 - any unreadable config falls back to the built-in default
+        return DEFAULT_PROMPT_CARD_CHARS
 
 
 def read_manifest(project_dir: str | Path) -> list[dict[str, Any]]:
@@ -306,6 +317,11 @@ CHEMIST_ONLY_STATUSES = ("direct", "same_start_end")
 DEFAULT_TARGET_NODES = ("design_init_experiments", "hypothesis_action")
 MAX_QUOTE_CHARS = 900
 MIN_SUMMARY_CHARS = 40
+# The decision engine keeps only this many characters of each card's text (summary, then a status
+# line, then the transferability note, then the excerpt) unless the agent config says otherwise.
+DEFAULT_PROMPT_CARD_CHARS = 400
+# Room to leave after the summary so the status line and the start of the note are still in view.
+PROMPT_TAIL_CHARS = 100
 FUZZY_THRESHOLD = 0.95
 MIN_OPTION_CHARS = 3
 MIN_DUPLICATE_CHARS = 20
@@ -493,6 +509,15 @@ def check_draft(
     if len(summary) < MIN_SUMMARY_CHARS:
         found.error(
             "summary_too_short", f"The summary needs at least {MIN_SUMMARY_CHARS} characters of what was run and found."
+        )
+    prompt_chars = int(context.get("prompt_card_chars") or DEFAULT_PROMPT_CARD_CHARS)
+    if len(summary) > prompt_chars - PROMPT_TAIL_CHARS:
+        found.warn(
+            "summary_long",
+            f"The summary has {len(summary)} characters, but the agent's prompt keeps only {prompt_chars} per card "
+            f"(summary, then the mapping status, then the transferability note). Above about "
+            f"{prompt_chars - PROMPT_TAIL_CHARS} the status line and the note fall out of view: put the finding "
+            "first and shorten it.",
         )
     if not str(draft.get("transferability_note") or "").strip():
         found.error(
