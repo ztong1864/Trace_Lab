@@ -252,9 +252,9 @@ class PrepareSourcesTests(unittest.TestCase):
         packet = (self.literature.work_dir(self.project.project_dir) / "packets" / ready["packets"][0]).read_text(
             encoding="utf-8"
         )
-        self.assertIn("=== PAGE 1 ===", packet)
-        self.assertIn("=== PAGE 3 ===", packet)
-        self.assertNotIn("=== PAGE 4 ===", packet, "text after the references heading is left out of the packet")
+        self.assertIn("=== PAGE 1 (reading order) ===", packet)
+        self.assertIn("=== PAGE 3 (reading order) ===", packet)
+        self.assertNotIn("=== PAGE 4", packet, "text after the references heading is left out of the packet")
         self.assertTrue(self.literature.work_dir(self.project.project_dir).joinpath("context.json").exists())
 
     def test_reprepare_is_idempotent_and_keeps_other_sources(self):
@@ -301,6 +301,318 @@ class PrepareSourcesTests(unittest.TestCase):
     def test_prepare_needs_a_project(self):
         with self.assertRaisesRegex(self.literature.LiteratureError, "No project"):
             self.literature.prepare_sources(self.base / "nowhere", [])
+
+
+_LAYOUT = [
+    "Fe(III)-Catalyzed Aerobic Oxidation of 1,4-Diols\nAbstract page without results.",
+    (
+        "Table 1 The effects of solvents and the loading of catalysts\n"
+        "  Entry   x    y     Solvent      NMR yield of 2a/%\n"
+        "  1       10   10    DCE          59\n"
+        "  2       10   10    THF          17\n"
+        "  7       10   10    Toluene      87 (81b)\n"
+        "  11e     5    10    Toluene      88\n"
+    ),
+    "Scheme 2 substrate scope. Reactions ran at 25 °C for 24 h with 1.0 mmol substrate.",
+]
+_READING = [
+    _LAYOUT[0],
+    (
+        "Study on the solvent effect led to the observation that the highest NMR yield of 87% for lactone 2a "
+        "was realized upon using toluene as solvent (Table 1, entry 7). The role of Fe(NO₃)₃·9H₂O "
+        "and TEMPO was found to be vital, since no product was formed without oxida-\ntion catalysts."
+    ),
+    _LAYOUT[2],
+]
+_CONTEXT = {
+    "variables": [
+        {"name": "Catalyst", "type": "categorical", "optimized": True, "options": ["cat_a", "cat_b"]},
+        {"name": "Solvent", "type": "categorical", "optimized": True, "options": ["dce", "thf", "toluene"]},
+        {"name": "Base", "type": "categorical", "optimized": False, "options": ["k2co3"]},
+    ]
+}
+_GOOD = {
+    "source_id": "paper_ab12cd34",
+    "finding_id": "f1",
+    "page": 2,
+    "quote": "7 10 10 Toluene 87 (81b)",
+    "summary": "Toluene gave 87% NMR yield of the lactone (81% isolated) with 10 mol% Fe and TEMPO at 25 °C.",
+    "variable_scope": ["Solvent"],
+    "proposed_mapping_status": "same_reaction_family",
+    "confidence": 0.9,
+    "transferability_note": "Butane-1,4-diol at 1 mmol; the project uses a different diol and scale.",
+}
+
+
+class VerifyDraftTests(unittest.TestCase):
+    def setUp(self):
+        from chem_agent_bo.lab import literature
+
+        self.lit = literature
+        self.texts = {"layout": _LAYOUT, "reading": _READING}
+
+    def check(self, **changes):
+        draft = {**_GOOD, **changes}
+        return self.lit.check_draft(
+            draft, texts=self.texts, context=_CONTEXT, taken_card_ids=set(), existing_excerpts=[]
+        )
+
+    def codes(self, record, kind="errors"):
+        return {item["code"] for item in record[kind]}
+
+    def test_a_faithful_table_row_passes(self):
+        record = self.check()
+        self.assertEqual(record["status"], "ok", record["errors"])
+        self.assertEqual(record["card_id"], "paper_ab12cd34_f1")
+        self.assertEqual(record["quote_match"]["mode"], "exact")
+        self.assertEqual(record["quote_match"]["variant"], "layout")
+        self.assertEqual(record["confidence"], "0.9")
+        self.assertEqual(record["matched_options"], {"Solvent": ["toluene"]})
+
+    def test_spacing_dashes_subscripts_and_hyphenation_do_not_matter(self):
+        prose = self.check(
+            quote="The role of Fe(NO3)3·9H2O and TEMPO was found to be vital, since no product was formed "
+            "without oxidation catalysts.",
+            summary="Both Fe(NO3)3·9H2O and TEMPO were required for the lactone to form in the screen here.",
+        )
+        self.assertEqual(prose["status"], "ok", prose["errors"])
+        self.assertEqual(prose["quote_match"]["variant"], "reading")
+        spaced = self.check(quote="7   10 10\nToluene    87 (81b)")
+        self.assertEqual(spaced["status"], "ok", spaced["errors"])
+
+    def test_a_fabricated_quote_is_rejected(self):
+        record = self.check(quote="Toluene gave the highest yield of any solvent tested in this work.")
+        self.assertEqual(record["status"], "rejected")
+        self.assertIn("quote_not_found", self.codes(record))
+
+    def test_a_changed_digit_is_not_a_typo(self):
+        record = self.check(quote="7 10 10 Toluene 89 (81b)", summary=_GOOD["summary"].replace("87%", "89%"))
+        self.assertIn("quote_not_found", self.codes(record))
+        # An 11-entry row from the table with one digit altered must not pass as an approximate match either.
+        altered = self.check(quote="Study on the solvent effect led to the observation that the highest NMR yield of 88% for lactone 2a")
+        self.assertIn("quote_not_found", self.codes(altered))
+
+    def test_a_small_wording_slip_is_accepted_but_flagged(self):
+        quote = (
+            "Study on the solvent effect led to the observation that the highest NMR yield of 87% for lactone 2a "
+            "was realised upon using toluene as solvent"
+        )
+        record = self.check(
+            quote=quote,
+            page=2,
+            summary="Toluene gave the highest NMR yield of the lactone, 87%, of the solvents in this screen.",
+        )
+        self.assertEqual(record["status"], "ok", record["errors"])
+        self.assertIn("quote_approximate", self.codes(record, "warnings"))
+
+    def test_wrong_page_is_corrected(self):
+        record = self.check(page=1)
+        self.assertEqual(record["status"], "ok")
+        self.assertEqual(record["page"], 2)
+        self.assertIn("page_corrected", self.codes(record, "warnings"))
+
+    def test_joined_excerpts_must_all_be_on_one_page(self):
+        joined = self.check(
+            quote="1 10 10 DCE 59 [...] 2 10 10 THF 17",
+            summary="DCE gave 59% and THF gave 17% NMR yield of the lactone in the solvent screen.",
+        )
+        self.assertEqual(joined["status"], "ok", joined["errors"])
+        split_across_pages = self.check(quote="1 10 10 DCE 59 ... Scheme 2 substrate scope")
+        self.assertIn("quote_not_found", self.codes(split_across_pages))
+
+    def test_numbers_in_the_summary_must_come_from_the_paper(self):
+        percent = self.check(summary="Toluene gave 92% NMR yield of the lactone (81% isolated) in this screen.")
+        self.assertIn("number_not_in_quote", self.codes(percent))
+        other = self.check(
+            summary="Toluene gave 87% NMR yield of the lactone at 60 °C after 12 h in the reported screen.",
+            quote="7 10 10 Toluene 87 (81b)",
+        )
+        self.assertEqual(other["status"], "ok")
+        self.assertIn("number_not_on_page", self.codes(other, "warnings"))
+
+    def test_scope_note_status_and_nodes_are_checked(self):
+        bad_scope = self.check(variable_scope=["Solvnt"])
+        self.assertIn("unknown_variable", self.codes(bad_scope))
+        self.assertIn("Did you mean `Solvent`", bad_scope["errors"][0]["message"])
+        self.assertIn("no_variable_scope", self.codes(self.check(variable_scope=[])))
+        self.assertIn("no_transferability_note", self.codes(self.check(transferability_note=" ")))
+        self.assertIn("bad_status", self.codes(self.check(proposed_mapping_status="same_redox_manifold")))
+        self.assertIn("bad_confidence", self.codes(self.check(confidence="very")))
+        self.assertIn("bad_target_node", self.codes(self.check(target_nodes=["nowhere"])))
+        self.assertIn("quote_too_long", self.codes(self.check(quote="x" * 901)))
+
+    def test_only_the_chemist_can_claim_a_direct_match(self):
+        for claimed in ("direct", "same_start_end"):
+            record = self.check(proposed_mapping_status=claimed)
+            self.assertEqual(record["status"], "ok")
+            self.assertEqual(record["mapping_status"], "same_reaction_family")
+            self.assertIn("status_downgraded", self.codes(record, "warnings"))
+
+    def test_scope_on_unoptimized_variables_only_would_never_be_shown(self):
+        record = self.check(variable_scope=["Base"])
+        self.assertIn("not_retrievable", self.codes(record, "warnings"))
+        self.assertNotIn("not_retrievable", self.codes(self.check(variable_scope=["Base"], proposed_mapping_status="background"), "warnings"))
+
+    def test_several_options_with_yields_are_flagged_as_lookup_like(self):
+        record = self.check(
+            quote="1 10 10 DCE 59 [...] 2 10 10 THF 17",
+            summary="DCE gave 59% and THF gave 17% NMR yield of the lactone in the solvent screen.",
+        )
+        self.assertEqual(record["status"], "ok", record["errors"])
+        self.assertEqual(record["matched_options"], {"Solvent": ["dce", "thf"]})
+        self.assertIn("lookup_like", self.codes(record, "warnings"))
+
+    def test_options_match_across_hyphens_underscores_and_case(self):
+        context = {
+            "variables": [
+                {"name": "TEMPO derivative", "type": "categorical", "optimized": True, "options": ["4_OH_TEMPO", "TEMPO"]},
+                {"name": "Solvent", "type": "categorical", "optimized": True, "options": ["dce"]},
+            ]
+        }
+        texts = {"layout": ["The reaction using 4-OH-TEMPO afforded 2a in 38% yield, much lower than with TEMPO."]}
+        record = self.lit.check_draft(
+            dict(
+                _GOOD,
+                page=1,
+                quote="The reaction using 4-OH-TEMPO afforded 2a in 38% yield, much lower than with TEMPO.",
+                summary="4-OH-TEMPO in place of TEMPO gave a much lower 38% yield of the lactone here.",
+                variable_scope=["TEMPO derivative"],
+            ),
+            texts=texts,
+            context=context,
+            taken_card_ids=set(),
+            existing_excerpts=[],
+        )
+        self.assertEqual(record["status"], "ok", record["errors"])
+        self.assertEqual(record["matched_options"], {"TEMPO derivative": ["4_OH_TEMPO", "TEMPO"]})
+
+    def test_existing_cards_from_the_same_paper_are_pointed_out(self):
+        record = self.lit.check_draft(
+            dict(_GOOD),
+            texts=self.texts,
+            context=_CONTEXT,
+            taken_card_ids=set(),
+            existing_excerpts=[],
+            same_paper_card_ids=["card_a", "card_b"],
+        )
+        self.assertEqual(record["status"], "ok")
+        self.assertIn("paper_already_cited", self.codes(record, "warnings"))
+        message = next(w["message"] for w in record["warnings"] if w["code"] == "paper_already_cited")
+        self.assertIn("card_a, card_b", message)
+
+    def test_findings_already_in_the_project_are_duplicates(self):
+        same_id = self.lit.check_draft(
+            dict(_GOOD),
+            texts=self.texts,
+            context=_CONTEXT,
+            taken_card_ids={"paper_ab12cd34_f1"},
+            existing_excerpts=[],
+        )
+        self.assertEqual(same_id["status"], "duplicate")
+        old_excerpt = self.lit.normalize_text("Entry 7 was 7 10 10 Toluene 87 (81b) in the original Table 1, row seven.")
+        same_quote = self.lit.check_draft(
+            dict(_GOOD, finding_id="f9"),
+            texts=self.texts,
+            context=_CONTEXT,
+            taken_card_ids=set(),
+            existing_excerpts=[old_excerpt],
+        )
+        self.assertEqual(same_quote["status"], "duplicate")
+
+    def test_a_source_without_text_is_rejected(self):
+        record = self.lit.check_draft(
+            dict(_GOOD), texts=None, context=_CONTEXT, taken_card_ids=set(), existing_excerpts=[]
+        )
+        self.assertEqual(record["status"], "rejected")
+        self.assertIn("unknown_source", self.codes(record))
+
+
+class VerifyDraftsOnDiskTests(unittest.TestCase):
+    def setUp(self):
+        import json
+
+        from chem_agent_bo.lab import literature
+
+        self.json, self.lit = json, literature
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "root"
+        self.project = _create_small_project(
+            LabBOService(projects_root=self.root), "ev", reaction_scope="oxidative lactonization of diols"
+        )
+        self.dir = self.project.project_dir
+        base = literature.work_dir(self.dir)
+        (base / "text").mkdir(parents=True)
+        (base / "drafts").mkdir()
+        (base / "text" / "paper_ab12cd34.json").write_text(
+            json.dumps({"pages": _LAYOUT, "pages_reading": _READING}), encoding="utf-8"
+        )
+        manifest = [
+            {"source_id": "paper_ab12cd34", "status": "ready"},
+            {"source_id": "scan_00000000", "status": "needs_ocr"},
+        ]
+        (base / "sources.jsonl").write_text("".join(json.dumps(item) + "\n" for item in manifest), encoding="utf-8")
+        literature.write_context(self.dir)
+        self.drafts = base / "drafts" / "drafts.jsonl"
+
+    def _write(self, *records, extra=""):
+        self.drafts.write_text(
+            "".join(self.json.dumps(item) + "\n" for item in records) + extra, encoding="utf-8"
+        )
+
+    def test_report_counts_and_verified_file(self):
+        good = dict(_GOOD, variable_scope=["Solvent"])
+        self._write(
+            good,
+            dict(good, finding_id="f2", quote="Toluene was the best solvent in every experiment we ran here."),
+            dict(good, finding_id="f1", page=2),
+            dict(good, source_id="scan_00000000", finding_id="f3"),
+            extra="not json\n",
+        )
+        report = self.lit.verify_drafts(self.dir)
+        self.assertEqual((report["checked"], report["ok"], report["rejected"]), (4, 1, 3))
+        self.assertEqual(len(report["unreadable_lines"]), 1)
+        self.assertEqual(report["unreadable_lines"][0]["line"], "5")
+        codes = report["by_code"]
+        for code in ("quote_not_found", "repeated_finding_id", "unknown_source"):
+            self.assertIn(code, codes)
+        written = [self.json.loads(line) for line in Path(report["verified_path"]).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([item["status"] for item in written], ["ok", "rejected", "rejected", "rejected"])
+
+    def test_cards_already_in_the_project_are_skipped(self):
+        LabBOService(projects_root=self.root).import_evidence(
+            "ev", cards=[{"card_id": "paper_ab12cd34_f1", "summary": "already here"}]
+        )
+        self._write(dict(_GOOD))
+        report = self.lit.verify_drafts(self.dir)
+        self.assertEqual((report["ok"], report["duplicate"]), (0, 1))
+
+    def test_cards_citing_the_same_doi_are_reported(self):
+        base = self.lit.work_dir(self.dir)
+        manifest = [{"source_id": "paper_ab12cd34", "status": "ready", "doi": "10.1002/cjoc.202200768"}]
+        (base / "sources.jsonl").write_text(self.json.dumps(manifest[0]) + "\n", encoding="utf-8")
+        LabBOService(projects_root=self.root).import_evidence(
+            "ev",
+            cards=[
+                {"card_id": "by_doi_field", "summary": "x", "doi": "10.1002/CJOC.202200768"},
+                {"card_id": "by_source_text", "summary": "y", "source": "Li et al. DOI: 10.1002/cjoc.202200768."},
+                {"card_id": "other_paper", "summary": "z", "doi": "10.1021/jacs.6b03948"},
+            ],
+        )
+        self._write(dict(_GOOD))
+        report = self.lit.verify_drafts(self.dir)
+        self.assertEqual(report["ok"], 1)
+        message = next(w["message"] for w in report["records"][0]["warnings"] if w["code"] == "paper_already_cited")
+        self.assertIn("2 existing card(s)", message)
+        self.assertIn("by_doi_field", message)
+        self.assertNotIn("other_paper", message)
+
+    def test_needs_prepare_first(self):
+        import shutil as _shutil
+
+        _shutil.rmtree(self.lit.work_dir(self.dir))
+        with self.assertRaisesRegex(self.lit.LiteratureError, "evidence-prepare"):
+            self.lit.verify_drafts(self.dir)
 
 
 if __name__ == "__main__":

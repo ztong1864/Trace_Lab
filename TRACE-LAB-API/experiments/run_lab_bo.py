@@ -135,6 +135,13 @@ def parse_args() -> argparse.Namespace:
     prepare_parser.add_argument("--project-dir", required=True)
     prepare_parser.add_argument("--pdf-dir", action="append", default=[], help="Folder with PDFs (repeatable).")
     prepare_parser.add_argument("--pdf", action="append", default=[], help="One PDF file (repeatable).")
+
+    verify_parser = subparsers.add_parser(
+        "evidence-verify",
+        help="Check drafted findings in evidence_work/drafts/ against the paper text.",
+    )
+    verify_parser.add_argument("--project-dir", required=True)
+    verify_parser.add_argument("--json", action="store_true", help="Print every checked record as JSON.")
     return parser.parse_args()
 
 
@@ -297,10 +304,44 @@ def main() -> None:
             raise SystemExit(str(exc)) from exc
         _print_prepare_result(result)
         return
+    if args.command == "evidence-verify":
+        from chem_agent_bo.lab.literature import LiteratureError, verify_drafts
+
+        try:
+            report = verify_drafts(service.project_path(args.project_dir))
+        except LiteratureError as exc:
+            raise SystemExit(str(exc)) from exc
+        if args.json:
+            _print_json(report)
+        else:
+            _print_verify_report(report)
+        if report["rejected"] or report["unreadable_lines"]:
+            raise SystemExit(1)
+        return
     if args.command == "unregister":
         _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))
         return
     raise ValueError(f"Unknown command: {args.command}")
+
+
+def _print_verify_report(report: dict[str, Any]) -> None:
+    print(
+        f"Checked {report['checked']} draft(s): {report['ok']} ok ({report['with_warnings']} with warnings), "
+        f"{report['rejected']} rejected, {report['duplicate']} duplicate.\n"
+    )
+    for item in report["unreadable_lines"]:
+        print(f"  UNREADABLE {item['file']} line {item['line']}: {item['message']}")
+    for record in report["records"]:
+        if record["status"] == "ok" and not record["warnings"]:
+            continue
+        print(f"{record['status'].upper():<9} {record['card_id'] or '(no id)'}")
+        for item in record["errors"]:
+            print(f"    error   [{item['code']}] {item['message']}")
+        for item in record["warnings"]:
+            print(f"    warning [{item['code']}] {item['message']}")
+    if report["by_code"]:
+        print("\nBy code: " + ", ".join(f"{code} x{count}" for code, count in report["by_code"].items()))
+    print(f"\nFull results: {report['verified_path']}")
 
 
 def _print_prepare_result(result: dict[str, Any]) -> None:
