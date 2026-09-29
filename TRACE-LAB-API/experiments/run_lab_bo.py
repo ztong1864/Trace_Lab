@@ -127,6 +127,14 @@ def parse_args() -> argparse.Namespace:
     )
     preview_parser.add_argument("--project-dir", required=True)
     preview_parser.add_argument("--json", action="store_true", help="Print the full result as JSON.")
+
+    prepare_parser = subparsers.add_parser(
+        "evidence-prepare",
+        help="Extract page text from papers and write the drafting packets and project context.",
+    )
+    prepare_parser.add_argument("--project-dir", required=True)
+    prepare_parser.add_argument("--pdf-dir", action="append", default=[], help="Folder with PDFs (repeatable).")
+    prepare_parser.add_argument("--pdf", action="append", default=[], help="One PDF file (repeatable).")
     return parser.parse_args()
 
 
@@ -275,10 +283,37 @@ def main() -> None:
         else:
             _print_evidence_preview(preview)
         return
+    if args.command == "evidence-prepare":
+        from chem_agent_bo.lab.literature import LiteratureError, prepare_sources
+
+        pdfs = [Path(item) for item in args.pdf]
+        for folder in args.pdf_dir:
+            pdfs.extend(sorted(Path(folder).glob("*.pdf")))
+        if not pdfs:
+            raise SystemExit("Give at least one --pdf or a --pdf-dir that contains PDFs.")
+        try:
+            result = prepare_sources(service.project_path(args.project_dir), pdfs)
+        except LiteratureError as exc:
+            raise SystemExit(str(exc)) from exc
+        _print_prepare_result(result)
+        return
     if args.command == "unregister":
         _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))
         return
     raise ValueError(f"Unknown command: {args.command}")
+
+
+def _print_prepare_result(result: dict[str, Any]) -> None:
+    print(f"Work folder: {result['work_dir']}")
+    print(f"Project context: {result['context']}\n")
+    for item in result["sources"]:
+        if item["status"] == "ready":
+            pages = f"{item['page_count']} page(s)"
+            refs = f", references from page {item['references_from_page']}" if item["references_from_page"] else ""
+            print(f"  ready      {item['source_id']}  {pages}{refs}, {len(item['packets'])} packet(s), doi {item['doi'] or '-'}")
+        else:
+            print(f"  {item['status']:<10} {item['file']}: {item.get('note') or item.get('error', '')}")
+    print(f"\n{result['ready_count']} of {len(result['sources'])} paper(s) ready to draft from (packets/ folder).")
 
 
 def _print_evidence_preview(preview: dict[str, Any]) -> None:
