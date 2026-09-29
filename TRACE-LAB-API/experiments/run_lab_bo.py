@@ -120,6 +120,13 @@ def parse_args() -> argparse.Namespace:
     evidence_parser.add_argument("--project-dir", required=True)
     evidence_parser.add_argument("--file", required=True, help="Evidence cards as .jsonl or .csv.")
     evidence_parser.add_argument("--mode", choices=("append", "replace"), default="append")
+
+    preview_parser = subparsers.add_parser(
+        "evidence-preview",
+        help="Show which evidence cards the controller would be shown, and why the others never are.",
+    )
+    preview_parser.add_argument("--project-dir", required=True)
+    preview_parser.add_argument("--json", action="store_true", help="Print the full result as JSON.")
     return parser.parse_args()
 
 
@@ -261,10 +268,35 @@ def main() -> None:
             _print_json({"imported": False, "error": str(exc), "problems": exc.problems})
             raise SystemExit(1) from exc
         return
+    if args.command == "evidence-preview":
+        preview = service.evidence_preview(args.project_dir)
+        if args.json:
+            _print_json(preview)
+        else:
+            _print_evidence_preview(preview)
+        return
     if args.command == "unregister":
         _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))
         return
     raise ValueError(f"Unknown command: {args.command}")
+
+
+def _print_evidence_preview(preview: dict[str, Any]) -> None:
+    print(f"Project scope: {preview['reaction_scope']}")
+    print(f"{preview['card_count']} card(s); each ask shows the top {preview['top_k']} ({preview['top_k_source']}).\n")
+    print("Shown to the controller (one fixed set per ask, used by every node):")
+    for item in preview["retrieved"]:
+        print(f"  {item['rank']:>3}  {item['score']:>6}  {item['mapping_status']:<20} {item['card_id']}")
+    if preview["not_shown"]:
+        nearest = preview["not_shown"][0]
+        print(
+            f"\nEligible but not shown: {len(preview['not_shown'])} card(s); "
+            f"the best of them ranks {nearest['rank']} with score {nearest['score']}."
+        )
+    if preview["never_retrieved"]:
+        print("\nNever shown:")
+        for item in preview["never_retrieved"]:
+            print(f"  {item['card_id']} ({item['mapping_status']}): {item['reason_text']}")
 
 
 def _register_scan(service: LabBOService, folder: Path, *, dry_run: bool) -> dict[str, Any]:

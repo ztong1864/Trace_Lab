@@ -158,6 +158,16 @@ def create_app(projects_root: str | Path):
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/projects/{project_id}/evidence/preview")
+    def evidence_preview(project_id: str) -> dict[str, Any]:
+        """Which cards the controller would be shown, and why each of the others never is."""
+        try:
+            return service.evidence_preview(project_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.delete("/api/projects/{project_id}/registration")
     def unregister_project(project_id: str) -> dict[str, Any]:
         """Forget a registered project; its files are not touched."""

@@ -27,6 +27,27 @@ BLOCKED_LEAKAGE_RISKS = {
     "do_not_use",
     "blocked",
 }
+# The controller nodes that ask for evidence. Every ask retrieves once, for all of them together.
+LAB_EVIDENCE_TARGET_NODES = (
+    "design_init_experiments",
+    "stagnation_diagnosis",
+    "hypothesis_action",
+    "semantic_assessment",
+    "verification_pass",
+    "reflection_action",
+    "lab_batch_composition",
+)
+SCREEN_REASONS = {
+    "out_of_scope": "mapping_status is out_of_scope.",
+    "allowed_use_blocked": "allowed_use blocks the controller from seeing it.",
+    "leakage_risk_blocked": "leakage_risk marks it as oracle-like.",
+    "no_variable_overlap": "variable_scope shares no variable with the design space.",
+    "target_node_mismatch": "target_nodes lists no controller node that asks for evidence.",
+    "reaction_scope_mismatch": (
+        "mapping_status is direct/same_start_end, but the card's reaction_scope is not contained in "
+        "(or containing) the project's reaction_scope."
+    ),
+}
 MAPPING_PRIORITY = {
     "direct": 50,
     "same_start_end": 42,
@@ -119,39 +140,13 @@ class EvidenceStore:
         target_nodes: list[str] | None = None,
         max_items: int = 5,
     ) -> list[EvidenceCard]:
-        variable_set = {_norm(item) for item in variables}
-        target_set = {_norm(item) for item in target_nodes or []}
         scored: list[tuple[float, int, EvidenceCard]] = []
         for card in self.cards:
-            if card.mapping_status == "out_of_scope":
-                continue
-            if card.allowed_use.strip().lower() in BLOCKED_ALLOWED_USES:
-                continue
-            if _norm(card.leakage_risk) in BLOCKED_LEAKAGE_RISKS:
-                continue
-            card_variables = {_norm(item) for item in card.variable_scope}
-            variable_overlap = variable_set.intersection(card_variables)
-            if card_variables:
-                if not variable_overlap and card.mapping_status != "background":
-                    continue
-            card_targets = {_norm(item) for item in card.target_nodes}
-            target_overlap = target_set.intersection(card_targets)
-            if target_set and card_targets and not target_overlap:
-                continue
-            if reaction_scope and card.reaction_scope:
-                reaction_match = _reaction_match(reaction_scope, card.reaction_scope)
-                if not reaction_match:
-                    if card.mapping_status in {"direct", "same_start_end"}:
-                        continue
-            else:
-                reaction_match = False
-            score = _card_score(
-                card,
-                variable_overlap=len(variable_overlap),
-                target_overlap=len(target_overlap),
-                reaction_match=reaction_match,
+            score, _reason = self._screen(
+                card, variables=variables, reaction_scope=reaction_scope, target_nodes=target_nodes
             )
-            scored.append((score, len(scored), card))
+            if score is not None:
+                scored.append((score, len(scored), card))
         limit = max(0, int(max_items))
         return [
             card
@@ -159,6 +154,121 @@ class EvidenceStore:
                 :limit
             ]
         ]
+
+    def explain(
+        self,
+        *,
+        variables: list[str],
+        reaction_scope: str = "",
+        target_nodes: list[str] | None = None,
+        max_items: int = 5,
+    ) -> list[dict[str, Any]]:
+        """One entry per card: whether `applicable` would return it, at which rank, or why never.
+
+        Uses the same screening as `applicable`, so the two cannot disagree. `reason` is
+        empty for a card that passes the screen (it may still miss the `max_items` cut).
+        """
+        screened = [
+            (card, *self._screen(card, variables=variables, reaction_scope=reaction_scope, target_nodes=target_nodes))
+            for card in self.cards
+        ]
+        passing = [(index, score) for index, (_card, score, _reason) in enumerate(screened) if score is not None]
+        # Same ordering as `applicable`: score descending, then file order.
+        ranked = [index for index, _score in sorted(passing, key=lambda item: (-item[1], item[0]))]
+        rank_of = {index: rank for rank, index in enumerate(ranked, start=1)}
+        limit = max(0, int(max_items))
+        entries = []
+        for index, (card, score, reason) in enumerate(screened):
+            rank = rank_of.get(index)
+            entries.append(
+                {
+                    "card_id": card.card_id,
+                    "mapping_status": card.mapping_status,
+                    "confidence": card.confidence,
+                    "score": None if score is None else round(score, 2),
+                    "rank": rank,
+                    "retrieved": rank is not None and rank <= limit,
+                    "reason": reason,
+                    "reason_text": SCREEN_REASONS.get(reason, ""),
+                }
+            )
+        return entries
+
+    @staticmethod
+    def _screen(
+        card: EvidenceCard,
+        *,
+        variables: list[str],
+        reaction_scope: str = "",
+        target_nodes: list[str] | None = None,
+    ) -> tuple[float | None, str]:
+        """Score a card for retrieval, or return (None, reason) when it can never be retrieved."""
+        variable_set = {_norm(item) for item in variables}
+        target_set = {_norm(item) for item in target_nodes or []}
+        if card.mapping_status == "out_of_scope":
+            return None, "out_of_scope"
+        if card.allowed_use.strip().lower() in BLOCKED_ALLOWED_USES:
+            return None, "allowed_use_blocked"
+        if _norm(card.leakage_risk) in BLOCKED_LEAKAGE_RISKS:
+            return None, "leakage_risk_blocked"
+        card_variables = {_norm(item) for item in card.variable_scope}
+        variable_overlap = variable_set.intersection(card_variables)
+        if card_variables:
+            if not variable_overlap and card.mapping_status != "background":
+                return None, "no_variable_overlap"
+        card_targets = {_norm(item) for item in card.target_nodes}
+        target_overlap = target_set.intersection(card_targets)
+        if target_set and card_targets and not target_overlap:
+            return None, "target_node_mismatch"
+        if reaction_scope and card.reaction_scope:
+            reaction_match = _reaction_match(reaction_scope, card.reaction_scope)
+            if not reaction_match:
+                if card.mapping_status in {"direct", "same_start_end"}:
+                    return None, "reaction_scope_mismatch"
+        else:
+            reaction_match = False
+        score = _card_score(
+            card,
+            variable_overlap=len(variable_overlap),
+            target_overlap=len(target_overlap),
+            reaction_match=reaction_match,
+        )
+        return score, ""
+
+
+def retrieval_preview(
+    store: EvidenceStore,
+    *,
+    variables: list[str],
+    reaction_scope: str,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """What the controller would be shown for a project, using the retrieval an ask really makes.
+
+    An ask retrieves once, for all `LAB_EVIDENCE_TARGET_NODES` together and the design
+    variables, and keeps the `top_k` best cards; those same cards serve every controller
+    node in that ask. Cards split into `retrieved`, `not_shown` (eligible, but below the
+    cut) and `never_retrieved` (screened out, with the reason).
+    """
+    entries = store.explain(
+        variables=variables,
+        reaction_scope=reaction_scope,
+        target_nodes=list(LAB_EVIDENCE_TARGET_NODES),
+        max_items=top_k,
+    )
+    retrieved = sorted((item for item in entries if item["retrieved"]), key=lambda item: item["rank"])
+    not_shown = sorted(
+        (item for item in entries if item["rank"] is not None and not item["retrieved"]),
+        key=lambda item: item["rank"],
+    )
+    never = [item for item in entries if item["rank"] is None]
+    return {
+        "top_k": int(top_k),
+        "card_count": len(entries),
+        "retrieved": retrieved,
+        "not_shown": not_shown,
+        "never_retrieved": never,
+    }
 
 
 class EvidenceImportError(ValueError):

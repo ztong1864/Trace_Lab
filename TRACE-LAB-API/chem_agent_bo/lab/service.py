@@ -23,7 +23,7 @@ from chem_agent_bo.bo.registry import build_planner, supported_acquisitions, val
 from chem_agent_bo.config import load_agentic_bo_config
 from chem_agent_bo.config.schema import AgenticBOConfig
 from chem_agent_bo.lab.design_space import DescriptorTableError, DesignSpace
-from chem_agent_bo.lab.evidence import EvidenceStore
+from chem_agent_bo.lab.evidence import LAB_EVIDENCE_TARGET_NODES, EvidenceStore, retrieval_preview
 from chem_agent_bo.lab.project import (
     LabProject,
     ObservationTable,
@@ -40,15 +40,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LAB_SUPPORTED_PLANNERS = {"atlas", "chunked_gp", "random"}
 # Planners that can use per-option numeric descriptors as GP inputs.
 LAB_DESCRIPTOR_PLANNERS = {"atlas", "chunked_gp"}
-LAB_EVIDENCE_TARGET_NODES = (
-    "design_init_experiments",
-    "stagnation_diagnosis",
-    "hypothesis_action",
-    "semantic_assessment",
-    "verification_pass",
-    "reflection_action",
-    "lab_batch_composition",
-)
 
 # Settings that update_project_config may change. project_id, objective_name and
 # goal are deliberately excluded: existing observations depend on them.
@@ -425,6 +416,39 @@ class LabBOService:
             "evidence_file": project.load_config().evidence_file,
             "converted_from": converted_from,
             "backup_dir": str(backup_dir),
+        }
+
+    def evidence_preview(self, project_id_or_dir: str | Path) -> dict[str, Any]:
+        """Which evidence cards an ask would show the controller, and why the others never are."""
+        project = LabProject(self.project_path(project_id_or_dir))
+        config = project.load_config()
+        design_space = project.load_design_space()
+        top_k, top_k_source = 5, "default"
+        try:
+            agent_config = _load_agentic_config(config.agent_config_path, project_dir=project.project_dir)
+            top_k = int(agent_config.orchestrator.knowledge_top_k or 5)
+            top_k_source = "agent config"
+        except (FileNotFoundError, ValueError, OSError):
+            pass
+        store = EvidenceStore.load(project.evidence_path)
+        preview = retrieval_preview(
+            store,
+            variables=design_space.variable_names,
+            reaction_scope=config.reaction_scope,
+            top_k=top_k,
+        )
+        by_id = {card.card_id: card for card in store.cards}
+        for group in ("retrieved", "not_shown", "never_retrieved"):
+            for item in preview[group]:
+                card = by_id[item["card_id"]]
+                item["source"] = card.source[:160]
+                item["reaction_scope"] = card.reaction_scope
+        return {
+            "handle": self.handle_for(project.project_dir),
+            "reaction_scope": config.reaction_scope,
+            "target_nodes": list(LAB_EVIDENCE_TARGET_NODES),
+            "top_k_source": top_k_source,
+            **preview,
         }
 
     def unregister_project(self, handle: str) -> dict[str, Any]:

@@ -19,7 +19,13 @@ from typing import Any
 import yaml
 
 from chem_agent_bo.lab.design_space import DesignSpace
-from chem_agent_bo.lab.evidence import ALLOWED_MAPPING_STATUSES
+from chem_agent_bo.lab.evidence import (
+    ALLOWED_MAPPING_STATUSES,
+    SCREEN_REASONS,
+    EvidenceStore,
+    _card_from_dict,
+    retrieval_preview,
+)
 from chem_agent_bo.lab.project import ObservationTable, ProjectConfig
 from chem_agent_bo.lab.service import (
     LAB_DESCRIPTOR_PLANNERS,
@@ -306,6 +312,28 @@ def _check_evidence(
         if count > 1:
             report.error(filename, f"card_id `{card_id}` appears {count} times.")
     report.facts["evidence_card_count"] = len(cards)
+    if design is not None and config is not None:
+        _warn_unretrievable_cards(filename, cards, design, config, report)
+
+
+def _warn_unretrievable_cards(
+    filename: str, cards: list[tuple[int, dict[str, Any]]], design: DesignSpace, config: ProjectConfig, report: _Report
+) -> None:
+    """Warn about cards the controller can never see by accident (not the deliberately blocked ones)."""
+    store = EvidenceStore([_card_from_dict(card) for _line, card in cards])
+    preview = retrieval_preview(
+        store, variables=design.variable_names, reaction_scope=config.reaction_scope, top_k=len(cards) or 1
+    )
+    by_reason: dict[str, list[str]] = {}
+    for item in preview["never_retrieved"]:
+        if item["reason"] in {"no_variable_overlap", "target_node_mismatch", "reaction_scope_mismatch"}:
+            by_reason.setdefault(item["reason"], []).append(item["card_id"])
+    for reason, card_ids in sorted(by_reason.items()):
+        report.warn(
+            filename,
+            f"{len(card_ids)} card(s) can never be shown to the controller: {SCREEN_REASONS[reason]} "
+            f"(e.g. {', '.join(card_ids[:3])}). See the evidence preview.",
+        )
 
 
 def _value_problem(exc: Exception) -> str:
