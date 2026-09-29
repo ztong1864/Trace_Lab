@@ -449,12 +449,16 @@ class LabBOService:
         project = LabProject(self.project_path(project_id_or_dir))
         config = project.load_config()
         design_space = project.load_design_space()
-        top_k, top_k_source = 5, "default"
+        # What the agent config allows: how many cards an ask retrieves, how many the decision
+        # engine reads, and how much of each card's text reaches the prompt.
+        top_k, read_items, card_chars, top_k_source = 5, 5, 400, "default"
         try:
             agent_config = _load_agentic_config(config.agent_config_path, project_dir=project.project_dir)
             top_k = int(agent_config.orchestrator.knowledge_top_k or 5)
+            read_items = int(agent_config.prompt.decision_engine_knowledge_max_items)
+            card_chars = int(agent_config.prompt.decision_engine_knowledge_max_chars)
             top_k_source = "agent config"
-        except (FileNotFoundError, ValueError, OSError):
+        except (FileNotFoundError, ValueError, OSError, TypeError, AttributeError):
             pass
         store = EvidenceStore.load(project.evidence_path)
         preview = retrieval_preview(
@@ -470,11 +474,28 @@ class LabBOService:
                 card = by_id[item["card_id"]]
                 item["source"] = card.source[:160]
                 item["reaction_scope"] = card.reaction_scope
+        # The text of a retrieved card as the decision engine passes it on: cut at card_chars, and
+        # only the first read_items cards are read at all.
+        for item in preview["retrieved"]:
+            content = LabEvidenceProvider._card_to_unit(by_id[item["card_id"]], rank=item["rank"])["content"]
+            item["prompt_text"] = content[:card_chars] + ("..." if len(content) > card_chars else "")
+            item["hidden_chars"] = max(0, len(content) - card_chars)
+            item["read_by_agent"] = item["rank"] <= read_items
         return {
             "handle": self.handle_for(project.project_dir),
             "reaction_scope": config.reaction_scope,
             "target_nodes": list(LAB_EVIDENCE_TARGET_NODES),
             "top_k_source": top_k_source,
+            "prompt_card_chars": card_chars,
+            "prompt_max_items": read_items,
+            "warnings": _evidence_preview_warnings(
+                preview,
+                selection=config.evidence_selection,
+                variables=design_space.variable_names,
+                top_k=top_k,
+                read_items=read_items,
+                summaries={item["card_id"]: by_id[item["card_id"]].summary for item in preview["retrieved"]},
+            ),
             **preview,
         }
 
@@ -1696,6 +1717,55 @@ def _validate_project_config(config: ProjectConfig, *, project_dir: Path) -> Non
             _resolve_agent_config_path(config.agent_config_path, project_dir=project_dir)
         except FileNotFoundError as exc:
             raise ValueError(str(exc)) from exc
+
+
+def _evidence_preview_warnings(
+    preview: dict[str, Any],
+    *,
+    selection: str,
+    variables: list[str],
+    top_k: int,
+    read_items: int,
+    summaries: dict[str, str],
+) -> list[str]:
+    """Plain-language problems between the evidence settings and the agent config's limits."""
+    warnings = []
+    same: dict[str, list[str]] = {}
+    for card_id, summary in summaries.items():
+        same.setdefault(" ".join(str(summary).lower().split()), []).append(card_id)
+    for card_ids in same.values():
+        if len(card_ids) > 1:
+            warnings.append(
+                f"Cards {', '.join(card_ids)} have the same summary, so they take {len(card_ids)} of the "
+                "retrieved slots for one finding. Merge them or reword one."
+            )
+    if top_k > read_items:
+        warnings.append(
+            f"knowledge_top_k is {top_k} but decision_engine_knowledge_max_items is {read_items}: "
+            f"cards ranked below {read_items} are retrieved but never read by the agent."
+        )
+    if selection == "per_variable":
+        slotted = {
+            variable
+            for group in ("retrieved", "not_shown")
+            for item in preview[group]
+            for variable in item.get("slots", [])
+        }
+        reachable = min(top_k, read_items)
+        if len(slotted) > reachable:
+            warnings.append(
+                f"{len(slotted)} of {len(variables)} optimized variables have a card of their own, but only "
+                f"{reachable} cards are retrieved and read. Raise knowledge_top_k (orchestrator) and "
+                "decision_engine_knowledge_max_items (prompt) in the agent config to at least "
+                f"{len(slotted)}."
+            )
+    cut = [item["card_id"] for item in preview["retrieved"] if item.get("hidden_chars")]
+    if cut:
+        warnings.append(
+            f"{len(cut)} of the {len(preview['retrieved'])} retrieved cards are longer than the prompt keeps; "
+            "the cut text (usually the transferability note and the excerpt) is not seen by the agent."
+        )
+    return warnings
 
 
 def _load_agentic_config(path: str | Path, *, project_dir: Path) -> AgenticBOConfig:

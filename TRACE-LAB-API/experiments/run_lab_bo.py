@@ -406,10 +406,20 @@ def _print_prepare_result(result: dict[str, Any]) -> None:
 
 def _print_evidence_preview(preview: dict[str, Any]) -> None:
     print(f"Project scope: {preview['reaction_scope']}")
-    print(f"{preview['card_count']} card(s); each ask shows the top {preview['top_k']} ({preview['top_k_source']}).\n")
+    print(
+        f"{preview['card_count']} card(s); selection `{preview['selection']}`; each ask retrieves the top "
+        f"{preview['top_k']} ({preview['top_k_source']}), the agent reads {preview['prompt_max_items']} of them, "
+        f"{preview['prompt_card_chars']} characters each.\n"
+    )
     print("Shown to the controller (one fixed set per ask, used by every node):")
     for item in preview["retrieved"]:
-        print(f"  {item['rank']:>3}  {item['score']:>6}  {item['mapping_status']:<20} {item['card_id']}")
+        slots = f" [for: {', '.join(item['slots'])}]" if item.get("slots") else ""
+        unread = "  (NOT read: beyond the agent's limit)" if not item.get("read_by_agent", True) else ""
+        print(f"  {item['rank']:>3}  {item['score']:>6}  {item['mapping_status']:<20} {item['card_id']}{slots}{unread}")
+        text = str(item.get("prompt_text", "")).replace("\n", " ")
+        if text:
+            cut = f"  [+{item['hidden_chars']} characters not seen]" if item.get("hidden_chars") else ""
+            print(f"        the agent reads: {text}{cut}")
     if preview["not_shown"]:
         nearest = preview["not_shown"][0]
         print(
@@ -420,6 +430,8 @@ def _print_evidence_preview(preview: dict[str, Any]) -> None:
         print("\nNever shown:")
         for item in preview["never_retrieved"]:
             print(f"  {item['card_id']} ({item['mapping_status']}): {item['reason_text']}")
+    for line in preview.get("warnings", []):
+        print(f"\nWARNING: {line}")
 
 
 def _register_scan(service: LabBOService, folder: Path, *, dry_run: bool) -> dict[str, Any]:

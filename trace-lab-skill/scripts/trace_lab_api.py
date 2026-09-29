@@ -525,14 +525,26 @@ def format_check(report: dict[str, Any]) -> str:
 def format_evidence_preview(data: dict[str, Any]) -> str:
     shown = data.get("retrieved") or []
     lines = [
-        f"{data.get('card_count', 0)} card(s); each ask shows the top {data.get('top_k', '?')} to the controller "
-        "(one fixed set, used by every node)."
+        f"{data.get('card_count', 0)} card(s); selection `{data.get('selection', 'score')}`; each ask retrieves the top "
+        f"{data.get('top_k', '?')} (one fixed set, used by every node), the agent reads {data.get('prompt_max_items', '?')} "
+        f"of them, {data.get('prompt_card_chars', '?')} characters each."
     ]
     if shown:
         lines.extend(
             markdown_table(
-                ["rank", "score", "mapping_status", "card_id"],
-                [[str(item["rank"]), str(item["score"]), item["mapping_status"], item["card_id"]] for item in shown],
+                ["rank", "score", "mapping_status", "card_id", "for variable", "read", "cut"],
+                [
+                    [
+                        str(item["rank"]),
+                        str(item["score"]),
+                        item["mapping_status"],
+                        item["card_id"],
+                        ", ".join(item.get("slots") or []),
+                        "yes" if item.get("read_by_agent", True) else "no",
+                        str(item.get("hidden_chars", 0)),
+                    ]
+                    for item in shown
+                ],
             )
         )
     not_shown = data.get("not_shown") or []
@@ -543,6 +555,8 @@ def format_evidence_preview(data: dict[str, Any]) -> str:
         )
     for item in data.get("never_retrieved") or []:
         lines.append(f"Never shown: {item['card_id']} ({item['mapping_status']}): {item.get('reason_text', '')}")
+    for warning in data.get("warnings") or []:
+        lines.append(f"WARNING: {warning}")
     return "\n".join(lines)
 
 

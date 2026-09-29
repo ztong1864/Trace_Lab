@@ -333,6 +333,20 @@ def _check_evidence(
     for card_id, count in sorted(ids.items()):
         if count > 1:
             report.error(filename, f"card_id `{card_id}` appears {count} times.")
+    by_summary: dict[str, list[str]] = {}
+    for _line, card in cards:
+        summary = " ".join(str(card.get("summary") or card.get("content") or "").lower().split())
+        card_id = str(card.get("card_id") or card.get("id") or "").strip()
+        if summary and card_id:
+            by_summary.setdefault(summary, []).append(card_id)
+    for card_ids in by_summary.values():
+        unique = list(dict.fromkeys(card_ids))
+        if len(unique) > 1:
+            report.warn(
+                filename,
+                f"{len(unique)} cards have the same summary ({', '.join(unique[:4])}); they can fill several "
+                "of the few retrieval slots with one finding.",
+            )
     report.facts["evidence_card_count"] = len(cards)
     if design is not None and config is not None:
         _warn_unretrievable_cards(filename, cards, design, config, report)

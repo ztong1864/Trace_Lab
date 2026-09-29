@@ -160,7 +160,21 @@ def test_evidence_preview_calls_the_endpoint_and_summarizes_it(monkeypatch):
     preview = {
         "card_count": 3,
         "top_k": 1,
-        "retrieved": [{"rank": 1, "score": 79.7, "mapping_status": "same_reaction_family", "card_id": "card_a"}],
+        "selection": "per_variable",
+        "prompt_max_items": 1,
+        "prompt_card_chars": 400,
+        "warnings": ["2 of 3 optimized variables have a card of their own, but only 1 cards are retrieved and read."],
+        "retrieved": [
+            {
+                "rank": 1,
+                "score": 79.7,
+                "mapping_status": "same_reaction_family",
+                "card_id": "card_a",
+                "slots": ["Solvent"],
+                "read_by_agent": True,
+                "hidden_chars": 137,
+            }
+        ],
         "not_shown": [{"rank": 2, "score": 75.8, "mapping_status": "background", "card_id": "card_b"}],
         "never_retrieved": [
             {"card_id": "card_c", "mapping_status": "same_start_end", "reason_text": "reaction_scope does not match."}
@@ -174,7 +188,9 @@ def test_evidence_preview_calls_the_endpoint_and_summarizes_it(monkeypatch):
     text = trace_lab_api.format_summary(data, command="evidence-preview")
 
     assert calls == [("GET", "/api/projects/demo/evidence/preview")]
-    assert "3 card(s); each ask shows the top 1" in text
-    assert "| 1 | 79.7 | same_reaction_family | card_a |" in text
+    assert "3 card(s); selection `per_variable`; each ask retrieves the top 1" in text
+    assert "the agent reads 1 of them, 400 characters each" in text
+    assert "| 1 | 79.7 | same_reaction_family | card_a | Solvent | yes | 137 |" in text
+    assert "WARNING: 2 of 3 optimized variables" in text
     assert "the best of them ranks 2 with score 75.8" in text
     assert "Never shown: card_c (same_start_end): reaction_scope does not match." in text

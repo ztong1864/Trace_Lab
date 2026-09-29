@@ -992,5 +992,114 @@ class SelectionSettingTests(unittest.TestCase):
         self.assertEqual(slots["spec_base"], ["Base"])
 
 
+class PreviewPromptViewTests(unittest.TestCase):
+    """The preview shows what the agent really reads, and where the settings and its limits disagree."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name) / "root"
+        self.service = LabBOService(projects_root=self.root)
+        self.project = _create_small_project(self.service, "pv", planner_name="random", batch_size=2)
+        self.client = TestClient(create_app(self.root))
+
+    def _import(self, *cards):
+        response = self.client.post("/api/projects/pv/evidence/import", json={"cards": list(cards)})
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def _agent_config(self, top_k, max_items, max_chars):
+        (self.project.project_dir / "agent_bo.yaml").write_text(
+            "orchestrator:\n"
+            f"  knowledge_top_k: {top_k}\n"
+            "prompt:\n"
+            f"  decision_engine_knowledge_max_items: {max_items}\n"
+            f"  decision_engine_knowledge_max_chars: {max_chars}\n",
+            encoding="utf-8",
+        )
+        self.service.update_project_config("pv", {"agent_config_path": "agent_bo.yaml"})
+
+    def _preview(self):
+        response = self.client.get("/api/projects/pv/evidence/preview")
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_a_long_card_is_shown_cut_where_the_prompt_cuts_it(self):
+        long_card = {
+            "card_id": "long",
+            "summary": "S" * 300,
+            "variable_scope": ["Solvent"],
+            "transferability_note": "T" * 200,
+            "supporting_excerpt": "E" * 200,
+        }
+        short_card = {"card_id": "short", "summary": "Short finding.", "variable_scope": ["Catalyst"], "confidence": "0.5"}
+        self._import(long_card, short_card)
+        body = self._preview()
+        by_id = {item["card_id"]: item for item in body["retrieved"]}
+        self.assertEqual(body["prompt_card_chars"], 400)
+        self.assertEqual(body["top_k_source"], "agent config")
+        cut = by_id["long"]
+        self.assertTrue(cut["prompt_text"].endswith("..."))
+        self.assertEqual(len(cut["prompt_text"]), 403)
+        self.assertGreater(cut["hidden_chars"], 0)
+        self.assertIn("Transferability: T", cut["prompt_text"], "the note starts inside the limit...")
+        self.assertNotIn("T" * 100, cut["prompt_text"], "...but only its first characters are seen")
+        self.assertNotIn("Evidence excerpt", cut["prompt_text"], "the excerpt is past the cut")
+        self.assertEqual(by_id["short"]["hidden_chars"], 0)
+        self.assertTrue(by_id["short"]["prompt_text"].startswith("Short finding."))
+        self.assertTrue(any("longer than the prompt keeps" in w for w in body["warnings"]))
+
+    def test_cards_beyond_the_agents_read_limit_are_marked_and_warned(self):
+        self._agent_config(top_k=4, max_items=2, max_chars=200)
+        self._import(*[{"card_id": f"c{i}", "summary": f"Card {i}.", "variable_scope": ["Solvent"]} for i in range(4)])
+        body = self._preview()
+        self.assertEqual((body["top_k"], body["prompt_max_items"], body["prompt_card_chars"]), (4, 2, 200))
+        self.assertEqual([item["read_by_agent"] for item in body["retrieved"]], [True, True, False, False])
+        self.assertTrue(any("knowledge_top_k is 4 but decision_engine_knowledge_max_items is 2" in w for w in body["warnings"]))
+
+    def test_per_variable_warns_when_there_are_more_variable_slots_than_cards_read(self):
+        self._agent_config(top_k=5, max_items=2, max_chars=400)
+        self._import(
+            {"card_id": "cat", "summary": "Catalyst card.", "variable_scope": ["Catalyst"]},
+            {"card_id": "sol", "summary": "Solvent card.", "variable_scope": ["Solvent"]},
+            {"card_id": "base", "summary": "Base card.", "variable_scope": ["Base"]},
+        )
+        self.service.update_project_config("pv", {"evidence_selection": "per_variable"})
+        body = self._preview()
+        self.assertEqual([item["slots"] for item in body["retrieved"][:3]], [["Catalyst"], ["Solvent"], ["Base"]])
+        warning = next(w for w in body["warnings"] if "optimized variables have a card of their own" in w)
+        self.assertIn("3 of 3", warning)
+        self.assertIn("knowledge_top_k", warning)
+        self.assertIn("decision_engine_knowledge_max_items", warning)
+
+    def test_no_warning_when_the_limits_fit(self):
+        self._agent_config(top_k=3, max_items=3, max_chars=400)
+        self._import(
+            {"card_id": "cat", "summary": "Catalyst card.", "variable_scope": ["Catalyst"]},
+            {"card_id": "sol", "summary": "Solvent card.", "variable_scope": ["Solvent"]},
+            {"card_id": "base", "summary": "Base card.", "variable_scope": ["Base"]},
+        )
+        self.service.update_project_config("pv", {"evidence_selection": "per_variable"})
+        self.assertEqual(self._preview()["warnings"], [])
+
+    def test_an_unreadable_agent_config_falls_back_to_the_defaults(self):
+        self.service.update_project_config("pv", {"agent_config_path": "missing_agent.yaml"})
+        self._import({"card_id": "one", "summary": "One.", "variable_scope": ["Solvent"]})
+        body = self._preview()
+        self.assertEqual((body["top_k"], body["prompt_max_items"], body["prompt_card_chars"]), (5, 5, 400))
+        self.assertEqual(body["top_k_source"], "default")
+
+    def test_cards_with_the_same_summary_are_flagged_in_the_preview_and_the_check(self):
+        twin = {"summary": "The very same finding.", "variable_scope": ["Solvent"]}
+        self._import(dict(twin, card_id="twin_a"), dict(twin, card_id="twin_b"), {"card_id": "other", "summary": "Different."})
+        preview_warning = next(w for w in self._preview()["warnings"] if "same summary" in w)
+        self.assertIn("twin_a", preview_warning)
+        self.assertIn("twin_b", preview_warning)
+        report = self.service.check_project("pv")
+        message = next(w["message"] for w in report["warnings"] if "same summary" in w["message"])
+        self.assertIn("twin_a", message)
+        self.assertNotIn("other", message)
+        self.assertTrue(report["ok"], "duplicates are a warning, not an error")
+
+
 if __name__ == "__main__":
     unittest.main()
