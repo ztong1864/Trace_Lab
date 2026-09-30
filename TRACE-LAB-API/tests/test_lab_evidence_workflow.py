@@ -774,6 +774,37 @@ class SheetAndAcceptTests(_OnDiskProject):
         self.assertIn("quote_not_found", " ".join(caught.exception.problems))
         self.assertEqual(self._card_count(), 0)
 
+    _LONG = (
+        "Study on the solvent effect led to the observation that the highest NMR yield of 87% for lactone 2a "
+        "was realized upon using toluene as solvent"
+    )
+    _SUMMARY = "Toluene gave the highest NMR yield of the lactone, 87%, of the solvents in this screen."
+
+    def test_an_edited_quote_that_only_approximately_matches_is_refused(self):
+        """A one-word change in a long quote is inside the fuzzy tolerance; it must not become a 'verbatim' excerpt."""
+        self._write(dict(_GOOD, finding_id="f4", page=2, quote=self._LONG, summary=self._SUMMARY))
+        self.lit.verify_drafts(self.dir)
+        self._build()
+        self._decide(
+            {"paper_ab12cd34_f4": "accept"},
+            {"paper_ab12cd34_f4": {"supporting_excerpt": self._LONG.replace("highest", "lowest")}},
+        )
+        with self.assertRaises(self.lit.SheetError) as caught:
+            self.service.accept_evidence_sheet("ev")
+        self.assertIn("quote_edited_not_verbatim", " ".join(caught.exception.problems))
+        self.assertEqual(self._card_count(), 0)
+
+    def test_an_unedited_approximate_quote_is_still_accepted(self):
+        """Its `quote_approximate` warning was on the sheet the chemist read, so it is not blocked again."""
+        slip = self._LONG.replace("realized", "realised")
+        self._write(dict(_GOOD, finding_id="f4", page=2, quote=slip, summary=self._SUMMARY))
+        self.lit.verify_drafts(self.dir)
+        self._build()
+        self.assertIn("quote_approximate", {row["card_id"]: row for row in self._rows()}["paper_ab12cd34_f4"]["checks"])
+        self._decide({"paper_ab12cd34_f4": "accept"})
+        self.service.accept_evidence_sheet("ev")
+        self.assertEqual(self._card_count(), 1)
+
     def test_an_edited_summary_is_rechecked_too(self):
         self._build()
         self._decide(

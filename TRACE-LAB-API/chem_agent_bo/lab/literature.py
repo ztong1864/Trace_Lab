@@ -865,6 +865,8 @@ def cards_from_sheet(project_dir: str | Path, sheet_path: str | Path | None = No
             raise SheetError(f"The sheet is missing column(s): {', '.join(missing)}.", [])
     context = json.loads((base / "context.json").read_text(encoding="utf-8"))
     sources = {item["source_id"]: item for item in read_manifest(project_dir)}
+    # The excerpt each card had when it was verified; an approximate match was flagged on the sheet then.
+    verified_quotes = {str(item.get("card_id")): str(item.get("quote") or "") for item in _read_jsonl(base / "verified.jsonl")}
     problems: list[str] = []
     cards: list[dict[str, Any]] = []
     counts = {"accepted": 0, "rejected": 0, "undecided": 0}
@@ -910,6 +912,18 @@ def cards_from_sheet(project_dir: str | Path, sheet_path: str | Path | None = No
         )
         if checked["errors"]:
             problems.extend(f"{label}: [{item['code']}] {item['message']}" for item in checked["errors"])
+            continue
+        match = checked.get("quote_match") or {}
+        card_id = str(row.get("card_id") or "").strip()
+        if match.get("mode") == "fuzzy" and normalize_text(row.get("supporting_excerpt") or "") != normalize_text(
+            verified_quotes.get(card_id, "")
+        ):
+            # Approximate matching exists for PDF text-layer noise in a drafted quote. A quote someone typed over
+            # must be word for word, or "highest" could become "lowest" and still be filed as the paper's words.
+            problems.append(
+                f"{label}: [quote_edited_not_verbatim] The edited excerpt is not word for word in the paper "
+                f"(closest match {match.get('score')}). Restore the drafted excerpt or copy the text from the PDF exactly."
+            )
             continue
         counts["accepted"] += 1
         cards.append(

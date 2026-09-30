@@ -63,8 +63,9 @@ some PDF tables come out of the text layer with a column detached from its rows.
 That is why the review sheet puts the quote next to the summary and why the chemist,
 not the code, decides.
 
-`evidence-accept` re-checks every accepted row (an edited quote must still be in the
-paper, an edited summary's percentages must still be in the quote) and refuses the
+`evidence-accept` re-checks every accepted row (an edited quote must be in the paper word
+for word, since approximate matching is only tolerated for a drafted quote whose warning was
+on the sheet; an edited summary's percentages must still be in the quote) and refuses the
 whole sheet if any row has a problem or a `decision` is mistyped.
 
 ## Will a new card be shown? Check with `evidence-preview`
