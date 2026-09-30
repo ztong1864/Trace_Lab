@@ -183,6 +183,10 @@ def _add_project_args(parser: argparse.ArgumentParser) -> None:
 
 
 def main() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        # Piped I/O on a Windows code page (gbk, cp1252) cannot carry every character the API returns.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     args = parse_args()
     service = LabBOService()
     if args.command == "init":

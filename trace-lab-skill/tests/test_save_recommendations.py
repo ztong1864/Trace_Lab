@@ -29,3 +29,34 @@ def test_markdown_table_expands_candidate_fields():
     assert "| rank | recommendation_id | candidate |" not in table
     assert "round_001_rec_001" not in table
     assert "explore" not in table
+
+
+def test_reads_utf8_json_from_stdin_and_prints_it_on_a_gbk_console(tmp_path):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    payload = {
+        "project_id": "demo",
+        "round_id": "round_001",
+        "recommendations": [
+            {
+                "rank": 1,
+                "recommendation_id": "round_001_rec_001",
+                "candidate": {"Solvent": "DCE"},
+                "rationale": "Bäckvall-type conditions, 95 °C",
+            }
+        ],
+    }
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT_PATH), "-", "--output-dir", str(tmp_path)],
+        input=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        capture_output=True,
+        env={**os.environ, "PYTHONIOENCODING": "gbk"},
+        timeout=60,
+    )
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "Bäckvall-type conditions" in proc.stdout.decode("utf-8")
+    assert "Bäckvall-type conditions" in (tmp_path / "demo_round_001_recommendations.csv").read_text(encoding="utf-8-sig")

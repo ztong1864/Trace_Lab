@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,10 @@ ALLOWED_STATUSES = FINAL_STATUSES | {"pending"}
 
 
 def main() -> int:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        # Piped I/O on a Windows code page (gbk, cp1252) cannot carry every character the API returns.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Fill TRACE Lab result rows from recommendation CSV and outcome JSON."
     )

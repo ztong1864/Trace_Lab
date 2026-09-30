@@ -18,6 +18,10 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8788"
 
 
 def main() -> int:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        # Piped I/O on a Windows code page (gbk, cp1252) cannot carry every character the API returns.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Call TRACE Lab API endpoints.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON.")
@@ -178,11 +182,12 @@ def main() -> int:
     config.add_argument("--json", dest="settings_json", help="JSON object of settings to change.")
 
     for subparser in subparsers:
-        subparser.add_argument("--pretty", action="store_true", help=argparse.SUPPRESS)
+        # SUPPRESS: a value given before the subcommand must survive; the copy only speaks when the flag is repeated after it.
+        subparser.add_argument("--pretty", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         subparser.add_argument(
             "--format",
             choices=["json", "summary", "both"],
-            default=None,
+            default=argparse.SUPPRESS,
             help=argparse.SUPPRESS,
         )
 

@@ -194,3 +194,59 @@ def test_evidence_preview_calls_the_endpoint_and_summarizes_it(monkeypatch):
     assert "WARNING: 2 of 3 optimized variables" in text
     assert "the best of them ranks 2 with score 75.8" in text
     assert "Never shown: card_c (same_start_end): reaction_scope does not match." in text
+
+
+def test_output_survives_a_console_code_page_that_cannot_encode_the_text(tmp_path):
+    """Piped output on a Windows code page such as gbk cannot encode every character the API returns
+    (evidence cards quote papers with accented names); the agent captures the CLI through a pipe."""
+    import http.server
+    import json
+    import os
+    import subprocess
+    import sys
+    import threading
+
+    body = json.dumps({"ok": True, "note": "Bäckvall oxidation, 95 °C"}, ensure_ascii=False).encode("utf-8")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--base-url", f"http://127.0.0.1:{server.server_port}", "health"],
+            capture_output=True,
+            env={**os.environ, "PYTHONIOENCODING": "gbk"},
+            timeout=60,
+        )
+    finally:
+        server.shutdown()
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "Bäckvall oxidation" in proc.stdout.decode("utf-8")
+
+
+def test_format_and_pretty_work_before_or_after_the_subcommand(monkeypatch, capsys):
+    import json
+    import sys
+
+    monkeypatch.setattr(trace_lab_api, "request_json", lambda *a, **k: {"round_id": "round_001", "recommendations": []})
+    for argv in (
+        ["--format", "json", "--pretty", "ask", "demo"],
+        ["ask", "demo", "--format", "json", "--pretty"],
+    ):
+        monkeypatch.setattr(sys, "argv", ["trace_lab_api.py", *argv])
+        assert trace_lab_api.main() == 0
+        out = capsys.readouterr().out
+        # ask defaults to summary + JSON; an explicit --format json must give JSON only, indented.
+        assert json.loads(out) == {"round_id": "round_001", "recommendations": []}, argv
+        assert out.startswith('{' + chr(10) + '  "round_id"'), argv

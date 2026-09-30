@@ -12,6 +12,10 @@ from typing import Any
 
 
 def main() -> int:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        # Piped I/O on a Windows code page (gbk, cp1252) cannot carry every character the API returns.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="Convert TRACE Lab recommendation JSON to CSV and Markdown."
     )
