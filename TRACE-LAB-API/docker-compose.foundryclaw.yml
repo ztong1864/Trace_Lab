@@ -1,0 +1,28 @@
+# TRACE Lab next to FounDryClaw. Use together with docker-compose.yml:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.foundryclaw.yml up -d --build
+#
+# FounDryClaw's import_project copies a user's existing project into
+#   <FounDryClaw workspace>/<device>/<user>/trace_projects/<project>/
+# and registers that folder in TRACE in place, by its absolute path. The container must therefore see
+# FounDryClaw's workspace at the same absolute path as the host. Set in .env (next to this file):
+#
+#   FOUNDRYCLAW_WORKSPACE=/srv/foundryclaw/workspace   # FounDryClaw's workspace folder on this host
+#   TRACE_UID=1000                                     # the account FounDryClaw runs as (`id -u`)
+#   TRACE_GID=1000                                     # its group (`id -g`)
+#
+# TRACE writes recommendations, traces and logs into those project folders. Running the container as
+# FounDryClaw's account keeps the files owned by it, so FounDryClaw can still change and delete them
+# (unregister_project with delete_files). runs/lab_projects and .uploads must then be writable by that
+# account too: chown -R "$TRACE_UID:$TRACE_GID" runs/lab_projects .uploads
+services:
+  trace-lab:
+    user: "${TRACE_UID:?set TRACE_UID in .env to the uid FounDryClaw runs as}:${TRACE_GID:?set TRACE_GID in .env to the gid FounDryClaw runs as}"
+    environment:
+      HOME: /tmp
+    volumes:
+      - type: bind
+        source: ${FOUNDRYCLAW_WORKSPACE:?set FOUNDRYCLAW_WORKSPACE in .env to FounDryClaw's workspace folder}
+        target: ${FOUNDRYCLAW_WORKSPACE:?set FOUNDRYCLAW_WORKSPACE in .env to FounDryClaw's workspace folder}
+        bind:
+          create_host_path: false

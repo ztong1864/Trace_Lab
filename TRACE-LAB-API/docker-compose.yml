@@ -1,3 +1,5 @@
+# Standalone TRACE Lab. Next to FounDryClaw, add docker-compose.foundryclaw.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.foundryclaw.yml up -d --build
 services:
   trace-lab:
     build:
