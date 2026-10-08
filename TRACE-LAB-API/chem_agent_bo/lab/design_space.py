@@ -455,10 +455,16 @@ class DesignSpace:
     ) -> dict[str, Any]:
         variable = self._variable(variable_name)
         keys = _complete_numeric_descriptor_keys(variable)
+        own = None if keys else _own_value_descriptor(variable)
+        if own is not None:
+            keys = [OWN_VALUE_DESCRIPTOR]
         if max_descriptor_count is not None:
             keys = keys[: max(0, int(max_descriptor_count))]
         matrix: list[list[float]] = []
-        for option in variable.options:
+        for index, option in enumerate(variable.options):
+            if own is not None:
+                matrix.append([own[index]] if keys else [])
+                continue
             row: list[float] = []
             for key in keys:
                 parsed = _parse_descriptor_float(option.descriptors.get(key))
@@ -506,6 +512,8 @@ class DesignSpace:
                 for key, item in stats.items()
                 if item["numeric_count"] == len(variable.options) and len(variable.options) > 0
             ]
+            if not complete_numeric and _own_value_descriptor(variable) is not None:
+                complete_numeric = [OWN_VALUE_DESCRIPTOR]  # a numeric variable describes itself
             any_numeric = [
                 key for key, item in stats.items() if item["numeric_count"] > 0
             ]
@@ -540,6 +548,7 @@ class DesignSpace:
         missing: list[str] = []
         enabled: list[str] = []
         ignored: list[str] = []
+        own_value: list[str] = []
         duplicates: dict[str, list[list[str]]] = {}
         for variable in self.variables:
             if variable.name not in selected:
@@ -547,7 +556,10 @@ class DesignSpace:
             if variable.kind == "continuous":
                 ignored.append(variable.name)
                 continue
-            if _complete_numeric_descriptor_keys(variable):
+            has_table = bool(_complete_numeric_descriptor_keys(variable))
+            if not has_table and _own_value_descriptor(variable) is not None:
+                own_value.append(variable.name)
+            if has_table or variable.name in own_value:
                 groups = self._duplicate_descriptor_groups(variable.name)
                 if groups:
                     duplicates[variable.name] = groups
@@ -561,8 +573,11 @@ class DesignSpace:
             "missing_descriptor_variables": missing,
             "duplicate_descriptor_variables": duplicates,
             "ignored_continuous_variables": ignored,
+            # Discrete numeric variables without a descriptor table use their own values.
+            "own_value_variables": own_value,
             "mode": (
-                "all_active_categorical_variables_require_complete_unique_numeric_descriptors"
+                "categorical_variables_require_complete_unique_numeric_descriptors;"
+                "numeric_variables_use_their_own_values"
             ),
         }
 
@@ -1093,6 +1108,18 @@ def _descriptor_key_stats(variable: DesignVariable) -> dict[str, dict[str, int]]
             if _parse_descriptor_float(value) is not None:
                 item["numeric_count"] += 1
     return stats
+
+
+OWN_VALUE_DESCRIPTOR = "value"
+
+
+def _own_value_descriptor(variable: DesignVariable) -> list[float] | None:
+    """A discrete numeric variable (e.g. a temperature of 25/50/70) needs no descriptor table: its
+    values are its one descriptor. None for other kinds, or when an option is not a number."""
+    if variable.kind != "discrete_numeric" or not variable.options:
+        return None
+    values = [_parse_descriptor_float(option.value) for option in variable.options]
+    return None if any(value is None for value in values) else [float(value) for value in values]
 
 
 def _complete_numeric_descriptor_keys(variable: DesignVariable) -> list[str]:

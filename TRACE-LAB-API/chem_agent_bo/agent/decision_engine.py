@@ -298,8 +298,11 @@ class DecisionEngine:
         use_responses_api: bool = False,
         reasoning_effort: str | None = None,
         disable_response_storage: bool = False,
+        api_key: str | None = None,
     ) -> None:
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        # A caller-supplied key (e.g. the requesting user's own key, passed per request by the lab API)
+        # wins over the server's OPENAI_API_KEY.
+        api_key = (api_key or "").strip() or os.getenv("OPENAI_API_KEY")
         resolved_base = (
             api_base
             or os.getenv("OPENAI_BASE_URL")

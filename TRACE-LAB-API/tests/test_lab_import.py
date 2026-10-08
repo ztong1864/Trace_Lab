@@ -208,7 +208,7 @@ class ProjectCheckTests(unittest.TestCase):
     def test_evidence_problems(self):
         cards = [
             {"card_id": "c1", "source": "s", "summary": "x", "mapping_status": "direct", "variable_scope": ["Catalyst"]},
-            {"card_id": "c1", "source": "s", "summary": "y", "mapping_status": "same_redox_manifold"},
+            {"card_id": "c1", "source": "s", "summary": "y", "mapping_status": "maybe_related"},
             {"card_id": "c2", "source": "s", "summary": "z", "variable_scope": ["Ligand"]},
         ]
         import json
@@ -219,7 +219,7 @@ class ProjectCheckTests(unittest.TestCase):
         report = self._check()
         self.assertIn("card_id `c1` appears 2 times", self._messages(report))
         warnings = self._messages(report, "warnings")
-        self.assertIn("`same_redox_manifold`", warnings)
+        self.assertIn("`maybe_related`", warnings)
         self.assertIn("`Ligand`", warnings)
         self.assertEqual(report["facts"]["evidence_card_count"], 3)
 
@@ -616,7 +616,7 @@ class UploadTests(unittest.TestCase):
                 observations_csv=_as_csv([dict(_UPLOAD_OBSERVATIONS[0], Catalyst="cat_z")])
             ),
             "evidence": dict(
-                evidence_jsonl='{"card_id": "c1", "summary": "x", "mapping_status": "same_redox_manifold"}'
+                evidence_jsonl='{"card_id": "c1", "summary": "x", "mapping_status": "maybe_related"}'
             ),
             "settings": dict(config={"planner_name": "atlas", "acquisition_function": "ei_ucb", "controller_mode": "bo_only"}),
             "descriptors requested but missing": dict(descriptor_tables=[]),
@@ -629,7 +629,7 @@ class UploadTests(unittest.TestCase):
         detail = self.client.post("/api/projects", json=self._payload(**bad_cases["descriptor table"])).json()["detail"]
         self.assertEqual(detail["report"]["table_index"], 1)
         detail = self.client.post("/api/projects", json=self._payload(**bad_cases["evidence"])).json()["detail"]
-        self.assertIn("same_redox_manifold", " ".join(detail["problems"]))
+        self.assertIn("maybe_related", " ".join(detail["problems"]))
         detail = self.client.post(
             "/api/projects", json=self._payload(**bad_cases["descriptors requested but missing"])
         ).json()["detail"]
@@ -713,12 +713,12 @@ class EvidenceImportTests(unittest.TestCase):
             {"card_id": "a", "summary": "again"},
             {"card_id": "b", "summary": ""},
             {"summary": "no id"},
-            {"card_id": "c", "summary": "x", "mapping_status": "same_redox_manifold"},
+            {"card_id": "c", "summary": "x", "mapping_status": "maybe_related"},
         ]
         response = self._import(cards=cards)
         self.assertEqual(response.status_code, 400)
         problems = " | ".join(response.json()["detail"]["problems"])
-        for expected in ("repeats", "empty summary", "missing card_id", "same_redox_manifold"):
+        for expected in ("repeats", "empty summary", "missing card_id", "maybe_related"):
             self.assertIn(expected, problems)
         self.assertEqual(self._count(), 0)
         self.assertEqual(self._import(cards=cards[:1], mode="merge").status_code, 400)

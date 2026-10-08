@@ -19,7 +19,21 @@ ALLOWED_MAPPING_STATUSES = {
     "background",
     "out_of_scope",
 }
+# Words from other card-writing guides, read as TRACE's own. Both map to same_reaction_family:
+# `direct` and `same_start_end` stay the chemist's call (as for drafted cards).
+MAPPING_STATUS_ALIASES = {
+    "same_redox_manifold": "same_reaction_family",
+    "same_reaction": "same_reaction_family",
+}
 BLOCKED_ALLOWED_USES = {"blocked", "do_not_use", "oracle"}
+
+
+def normalize_mapping_status(raw: Any) -> tuple[str, bool]:
+    """(status, known): an alias becomes its TRACE status; known is False for an unknown word,
+    which is returned as given (loading reads it as `background`, importing refuses it)."""
+    status = str(raw or "background").strip().lower()
+    status = MAPPING_STATUS_ALIASES.get(status, status)
+    return status, status in ALLOWED_MAPPING_STATUSES
 BLOCKED_LEAKAGE_RISKS = {
     "oracle",
     "benchmark_oracle",
@@ -82,8 +96,8 @@ class EvidenceCard:
     notes: str = ""
 
     def normalized(self) -> "EvidenceCard":
-        status = str(self.mapping_status or "background").strip().lower()
-        if status not in ALLOWED_MAPPING_STATUSES:
+        status, known = normalize_mapping_status(self.mapping_status)
+        if not known:
             status = "background"
         return EvidenceCard(
             card_id=str(self.card_id),
@@ -343,13 +357,15 @@ def parse_evidence_upload(
     cards: list[dict[str, Any]] | None = None,
     jsonl: str | None = None,
     csv_text: str | None = None,
+    notes: list[str] | None = None,
 ) -> list[EvidenceCard]:
     """Strictly validate uploaded evidence cards (exactly one source).
 
     Unlike loading a project's own file, nothing is silently repaired here: a missing
     card_id or summary, a repeated card_id, or a mapping_status outside
     ALLOWED_MAPPING_STATUSES (which loading would quietly turn into `background`) is an
-    error, and all problems are reported together.
+    error, and all problems are reported together. A known alias (MAPPING_STATUS_ALIASES)
+    is stored as its TRACE status and reported in `notes` when a list is given.
     """
     given = [source for source in (cards, jsonl, csv_text) if source]
     if len(given) != 1:
@@ -381,11 +397,15 @@ def parse_evidence_upload(
         seen.setdefault(card_id, where)
         if not str(payload.get("summary") or payload.get("content") or "").strip():
             problems.append(f"{where} ({card_id}): empty summary.")
-        status = str(payload.get("mapping_status") or "background").strip().lower()
-        if status not in ALLOWED_MAPPING_STATUSES:
+        raw_status = str(payload.get("mapping_status") or "background").strip().lower()
+        status, known = normalize_mapping_status(raw_status)
+        if not known:
             problems.append(
-                f"{where} ({card_id}): mapping_status `{status}` must be one of {sorted(ALLOWED_MAPPING_STATUSES)}."
+                f"{where} ({card_id}): mapping_status `{raw_status}` must be one of {sorted(ALLOWED_MAPPING_STATUSES)} "
+                f"(or an alias: {', '.join(sorted(MAPPING_STATUS_ALIASES))})."
             )
+        elif status != raw_status and notes is not None:
+            notes.append(f"{card_id}: mapping_status `{raw_status}` stored as `{status}`.")
         parsed.append(_card_from_dict(payload))
     if problems:
         raise EvidenceImportError(f"{len(problems)} problem(s) in the evidence cards; nothing was imported.", problems)

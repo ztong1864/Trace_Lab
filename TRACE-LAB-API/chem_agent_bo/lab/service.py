@@ -45,6 +45,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LAB_SUPPORTED_PLANNERS = {"atlas", "chunked_gp", "random"}
 # Planners that can use per-option numeric descriptors as GP inputs.
 LAB_DESCRIPTOR_PLANNERS = {"atlas", "chunked_gp"}
+# Above this many combinations Atlas's optimizer takes many minutes or never finishes; an ask
+# whose planner comes from project.yaml then runs chunked_gp instead.
+ATLAS_LARGE_SPACE = 100_000
 
 # Settings that update_project_config may change. project_id, objective_name and
 # goal are deliberately excluded: existing observations depend on them.
@@ -60,6 +63,7 @@ EDITABLE_CONFIG_FIELDS = (
     "seed",
     "planner_use_descriptors",
     "allow_random_fallback",
+    "repeat_failed_conditions",
     "evidence_selection",
 )
 LOCKED_CONFIG_FIELDS = ("project_id", "objective_name", "goal")
@@ -165,13 +169,17 @@ class LabBOService:
         *,
         handle: str | None = None,
         drop_config_keys: list[str] | None = None,
+        set_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Make an existing project folder available by handle, used in place (no copy).
 
         The folder must pass the project check. `drop_config_keys` removes the listed
-        unknown settings (e.g. from another TRACE fork) from project.yaml after backing
-        it up; if the check still fails, the original project.yaml is put back.
+        unknown settings (e.g. from another TRACE fork) and `set_config` changes editable
+        settings (e.g. an `agent_config_path` that points at another server) in project.yaml
+        after one backup; if the check still fails, the original project.yaml is put back.
         """
+        if set_config is not None and not isinstance(set_config, dict):
+            raise ValueError("set_config must be an object of settings, e.g. {\"agent_config_path\": \"configs/agent_bo.yaml\"}.")
         from chem_agent_bo.lab.project_check import check_project
 
         if self.registry is None:
@@ -186,7 +194,9 @@ class LabBOService:
         if not lock.acquire(blocking=False):
             raise ProjectBusyError(f"An ask is running for {folder}; register it after the ask finishes.")
         try:
-            backup_path = _drop_config_keys(folder, list(drop_config_keys or []))
+            backup_path, config_changes = _rewrite_project_yaml(
+                folder, drop=list(drop_config_keys or []), updates=dict(set_config or {})
+            )
             report = check_project(folder)
             if not report["ok"]:
                 if backup_path:
@@ -200,6 +210,7 @@ class LabBOService:
             "project_dir": entry["path"],
             "registered_at": entry["registered_at"],
             "config_backup_path": str(backup_path) if backup_path else "",
+            "config_changes": config_changes,
             "check": report,
         }
 
@@ -385,7 +396,8 @@ class LabBOService:
             raise ValueError(f"mode must be `append` or `replace`; got `{mode}`.")
         for text, name in ((jsonl, "evidence JSONL"), (csv_text, "evidence CSV")):
             _check_upload_size(text, name)
-        new_cards = parse_evidence_upload(cards=cards, jsonl=jsonl, csv_text=csv_text)
+        status_notes: list[str] = []
+        new_cards = parse_evidence_upload(cards=cards, jsonl=jsonl, csv_text=csv_text, notes=status_notes)
         project = LabProject(self.project_path(project_id_or_dir))
         if not project.config_path.exists():
             raise FileNotFoundError(f"No project `{project_id_or_dir}`.")
@@ -422,6 +434,7 @@ class LabBOService:
             "evidence_file": project.load_config().evidence_file,
             "converted_from": converted_from,
             "backup_dir": str(backup_dir),
+            **({"status_notes": status_notes} if status_notes else {}),
         }
 
     def accept_evidence_sheet(
@@ -605,8 +618,13 @@ class LabBOService:
         controller_mode: str | None = None,
         agent_config_path: str | None = None,
         planner_use_descriptors: bool | None = None,
+        llm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate the next recommendation batch; one ask per project at a time."""
+        """Generate the next recommendation batch; one ask per project at a time.
+
+        `llm` ({api_key, base_url?, model?}) runs the agentic steps on the caller's own LLM key instead of
+        the server's OPENAI_API_KEY; it is used for this request only and never written anywhere."""
+        llm = _normalize_llm(llm)
         project = LabProject(self.project_path(project_id_or_dir))
         lock = _project_ask_lock(project.project_dir)
         if not lock.acquire(blocking=False):
@@ -622,6 +640,7 @@ class LabBOService:
                 controller_mode=controller_mode,
                 agent_config_path=agent_config_path,
                 planner_use_descriptors=planner_use_descriptors,
+                llm=llm,
             )
         finally:
             lock.release()
@@ -635,6 +654,7 @@ class LabBOService:
         controller_mode: str | None,
         agent_config_path: str | None,
         planner_use_descriptors: bool | None,
+        llm: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         config = project.load_config()
         design_space = project.load_design_space()
@@ -656,6 +676,23 @@ class LabBOService:
                 f"Lab mode supports {sorted(LAB_SUPPORTED_PLANNERS)} in the first release; "
                 f"got `{effective_planner_name}`."
             )
+        # Atlas from project.yaml on a large space may take many minutes or never finish: this ask
+        # runs chunked_gp instead and says so. An ask that names atlas explicitly keeps it.
+        planner_switched: dict[str, Any] | None = None
+        if not planner_name and effective_planner_name == "atlas":
+            combinations = _estimated_design_space_size(design_space)
+            if combinations is not None and combinations > ATLAS_LARGE_SPACE:
+                effective_planner_name = "chunked_gp"
+                planner_switched = {
+                    "from": "atlas",
+                    "to": "chunked_gp",
+                    "combinations": combinations,
+                    "message": (
+                        f"project.yaml asks for Atlas, which can take many minutes or not finish on "
+                        f"{combinations:,} combinations; this round used chunked_gp. Set planner_name: "
+                        "chunked_gp to make it permanent, or pass planner_name atlas to force Atlas."
+                    ),
+                }
         requested_planner_descriptors = (
             bool(config.planner_use_descriptors)
             if planner_use_descriptors is None
@@ -686,7 +723,12 @@ class LabBOService:
             variable_names=active_variables,
             objective_name=config.objective_name,
         )
-        banned_keys = _observation_candidate_keys(observations, design_space, active_variables)
+        # Failed and skipped conditions are excluded too (unless repeat_failed_conditions), so a
+        # condition that failed is not proposed again round after round.
+        banned_keys = _observation_candidate_keys(
+            observations, design_space, active_variables,
+            include_failed=not config.repeat_failed_conditions,
+        )
         banned_keys.update(_pending_recommendation_keys(project, design_space, active_variables))
         constraints = (
             [_exclude_candidate_keys(active_variables, banned_keys, design_space=design_space)]
@@ -712,8 +754,8 @@ class LabBOService:
             remaining = int(finite_space_size) - len(banned_keys)
             if remaining <= 0:
                 raise RuntimeError(
-                    "No feasible lab candidates remain after excluding completed "
-                    "and pending recommendations."
+                    "No feasible lab candidates remain after excluding completed, failed, "
+                    "skipped and pending recommendations."
                 )
             candidate_pool_size = min(candidate_pool_size, remaining)
             effective_batch_size = min(effective_batch_size, remaining)
@@ -811,6 +853,9 @@ class LabBOService:
             proposed_by=(
                 None if planner_error else planner.planner_diagnostics().get("pick_acquisitions")
             ),
+            estimates=(
+                None if planner_error else planner.planner_diagnostics().get("pick_estimates")
+            ),
         )
         candidate_pool = _attach_descriptor_context(
             candidate_pool=candidate_pool,
@@ -819,7 +864,7 @@ class LabBOService:
         )
         if effective_controller_mode == "agentic":
             assert agent_config is not None
-            decision_engine = _build_decision_engine(agent_config)
+            decision_engine = _build_decision_engine(agent_config, llm)
             runtime = _build_lab_controller_runtime(
                 agent_config=agent_config,
                 decision_engine=decision_engine,
@@ -844,7 +889,12 @@ class LabBOService:
                     objective_name=config.objective_name,
                     goal=config.goal,
                 ),
-                candidate_pool=candidate_pool,
+                # The agent's prompts stay as they were: the model estimates go to the
+                # recommendations (below), not to the shortlist the agent reads.
+                candidate_pool=[
+                    {key: value for key, value in item.items() if key != "model_estimate"}
+                    for item in candidate_pool
+                ],
                 batch_size=effective_batch_size,
                 search_space=param_space,
                 search_space_meta=_lab_search_space_meta(
@@ -852,7 +902,9 @@ class LabBOService:
                     planner_use_descriptors=effective_planner_descriptors,
                     planner_descriptor_eligibility=descriptor_eligibility,
                 ),
-                reaction_context=_lab_reaction_context(config),
+                reaction_context=_lab_reaction_context(
+                    config, observations=observations, variable_names=active_variables,
+                ),
                 goal=config.goal,
                 objective_name=config.objective_name,
                 iteration=len(project.load_batches()) + 1,
@@ -880,10 +932,12 @@ class LabBOService:
                 planner_error=planner_error,
                 evidence_cards=evidence_cards,
                 created_at=created_at,
+                objective_name=config.objective_name,
             )
 
         if not recommendations:
             raise RuntimeError("No feasible lab recommendations could be generated.")
+        _attach_model_estimates(recommendations, candidate_pool, design_space, active_variables)
 
         batch = RecommendationBatch(
             round_id=round_id,
@@ -902,13 +956,18 @@ class LabBOService:
             "third_party_log_path": str(third_party_log_path),
             "oracle_evaluation_disabled": True,
             "controller_mode": effective_controller_mode,
+            "llm_source": _llm_source(llm) if effective_controller_mode == "agentic" else "none",
             "planner_use_descriptors": effective_planner_descriptors,
             "planner_descriptor_eligibility": descriptor_eligibility,
             "planner_fallback": _planner_fallback_summary(
                 requested_planner_name=requested_planner_name,
                 planner_error=planner_error,
             ),
-            "planner_warnings": _planner_warnings(planner.planner_diagnostics()),
+            "planner_warnings": (
+                ([planner_switched["message"]] if planner_switched else [])
+                + _planner_warnings(planner.planner_diagnostics())
+            ),
+            **({"planner_switched": planner_switched} if planner_switched else {}),
         }
 
     def update_project_config(
@@ -1059,9 +1118,11 @@ class LabBOService:
         *,
         results: list[dict[str, Any]],
         reflect_results: bool = True,
+        llm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not results:
             raise ValueError("tell requires at least one result row.")
+        llm = _normalize_llm(llm)
         project = LabProject(self.project_path(project_id_or_dir))
         config = project.load_config()
         design_space = project.load_design_space()
@@ -1093,7 +1154,7 @@ class LabBOService:
                 config.agent_config_path,
                 project_dir=project.project_dir,
             )
-            decision_engine = _build_decision_engine(agent_config)
+            decision_engine = _build_decision_engine(agent_config, llm)
             runtime = _build_lab_controller_runtime(
                 agent_config=agent_config,
                 decision_engine=decision_engine,
@@ -1155,6 +1216,18 @@ class LabBOService:
                         f"Completed result for `{recommendation_id}` requires numeric "
                         f"`{config.objective_name}`."
                     ) from exc
+            elif status == "failed" and objective_value:
+                # A failed run reported with a number (e.g. yield 0: no product) is a real
+                # measurement; the optimizer learns from it (ObservationTable.model_rows).
+                try:
+                    objective_value = str(float(objective_value))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Failed result for `{recommendation_id}`: `{config.objective_name}` must be a "
+                        "number or left out."
+                    ) from exc
+            else:
+                objective_value = ""  # skipped, or failed without a measurement
             row = {
                 "observation_id": f"obs_{len(observations.rows) + 1:05d}",
                 "round_id": batch.round_id,
@@ -1162,7 +1235,7 @@ class LabBOService:
                 "source": "recommendation",
                 "stage": str(raw.get("stage") or "lab_recommendation"),
                 **{name: candidate.get(name, "") for name in condition_variables},
-                config.objective_name: objective_value if status == "completed" else "",
+                config.objective_name: objective_value,
                 "status": status,
                 "failure_reason": str(raw.get("failure_reason") or ""),
                 "notes": str(raw.get("notes") or ""),
@@ -1172,7 +1245,7 @@ class LabBOService:
             observations.rows.append(row)
             appended.append(row)
             recommendation["status"] = status
-            recommendation["result"] = objective_value if status == "completed" else ""
+            recommendation["result"] = objective_value
             recommendation["failure_reason"] = row["failure_reason"]
             recommendation["notes"] = row["notes"]
             recommendation["observed_at"] = row["observed_at"]
@@ -1224,6 +1297,7 @@ class LabBOService:
             "reflection_status": reflection_status,
             "reflection_errors": reflection_errors,
             "reflection_recommendation_ids": pending_reflection_ids,
+            "llm_source": _llm_source(llm) if agentic_mode else "none",
         }
 
     def reflect_completed_recommendations(
@@ -1231,8 +1305,10 @@ class LabBOService:
         project_id_or_dir: str | Path,
         *,
         recommendation_ids: list[str] | None = None,
+        llm: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Append delayed reflection records for completed lab recommendations."""
+        llm = _normalize_llm(llm)
 
         project = LabProject(self.project_path(project_id_or_dir))
         config = project.load_config()
@@ -1265,7 +1341,7 @@ class LabBOService:
             config.agent_config_path,
             project_dir=project.project_dir,
         )
-        decision_engine = _build_decision_engine(agent_config)
+        decision_engine = _build_decision_engine(agent_config, llm)
         runtime = _build_lab_controller_runtime(
             agent_config=agent_config,
             decision_engine=decision_engine,
@@ -1641,7 +1717,7 @@ def _parse_config_updates(updates: dict[str, Any], *, current: ProjectConfig) ->
             if name == "batch_size" and value < 1:
                 raise ValueError("batch_size must be at least 1.")
             values[name] = value
-        elif name in {"planner_use_descriptors", "allow_random_fallback"}:
+        elif name in {"planner_use_descriptors", "allow_random_fallback", "repeat_failed_conditions"}:
             if not isinstance(value, bool):
                 raise ValueError(f"{name} must be true or false; got {value!r}.")
             values[name] = value
@@ -1798,7 +1874,27 @@ def _resolve_api_base(config: AgenticBOConfig) -> str | None:
     )
 
 
-def _build_decision_engine(config: AgenticBOConfig):
+def _normalize_llm(llm: Any) -> dict[str, str] | None:
+    """A caller-supplied LLM ({api_key, base_url?, model?}), checked; None when absent."""
+    if llm in (None, {}):
+        return None
+    if not isinstance(llm, dict):
+        raise ValueError("`llm` must be an object {api_key, base_url?, model?}.")
+    unknown = sorted(set(llm) - {"api_key", "base_url", "model"})
+    if unknown:
+        raise ValueError(f"`llm` has unknown fields: {', '.join(unknown)}.")
+    cleaned = {key: str(value).strip() for key, value in llm.items() if value not in (None, "")}
+    if not cleaned.get("api_key"):
+        raise ValueError("`llm.api_key` is required when `llm` is given.")
+    return cleaned
+
+
+def _llm_source(llm: dict[str, str] | None) -> str:
+    """Which key the agentic steps used: the caller's (`request`) or the server's OPENAI_API_KEY."""
+    return "request" if llm else "server"
+
+
+def _build_decision_engine(config: AgenticBOConfig, llm: dict[str, str] | None = None):
     try:
         from chem_agent_bo.agent.decision_engine import DecisionEngine
     except ImportError as exc:  # pragma: no cover
@@ -1809,17 +1905,21 @@ def _build_decision_engine(config: AgenticBOConfig):
         ) from exc
 
     runtime_cfg = config.runtime
+    llm = llm or {}
+    # With a caller's own endpoint/model, the configured fallback model may not exist there: no fallback.
+    own_model = bool(llm.get("model"))
     return DecisionEngine(
-        model_name=runtime_cfg.model_name,
+        api_key=llm.get("api_key"),
+        model_name=llm.get("model") or runtime_cfg.model_name,
         temperature=runtime_cfg.temperature,
-        api_base=_resolve_api_base(config),
+        api_base=llm.get("base_url") or _resolve_api_base(config),
         timeout_sec=runtime_cfg.llm_timeout_sec,
         request_max_retries=runtime_cfg.llm_request_max_retries,
         structured_retry_attempts=runtime_cfg.llm_structured_retry_attempts,
         retry_backoff_sec=runtime_cfg.llm_retry_backoff_sec,
         retry_max_backoff_sec=runtime_cfg.llm_retry_max_backoff_sec,
         retry_jitter_sec=runtime_cfg.llm_retry_jitter_sec,
-        fallback_model_name=runtime_cfg.llm_fallback_model_name,
+        fallback_model_name=None if own_model else runtime_cfg.llm_fallback_model_name,
         fallback_attempts=runtime_cfg.llm_fallback_attempts,
         fail_on_nonretryable_error=runtime_cfg.llm_fail_on_nonretryable_error,
         pricing_profile=runtime_cfg.llm_pricing_profile,
@@ -1858,14 +1958,43 @@ def _build_lab_controller_runtime(
     )
 
 
-def _lab_reaction_context(config: ProjectConfig) -> dict[str, Any]:
-    return {
+_FAILED_CONTEXT_LIMIT = 20  # latest failed/skipped runs shown to the agent
+
+
+def _lab_reaction_context(
+    config: ProjectConfig,
+    *,
+    observations: ObservationTable | None = None,
+    variable_names: list[str] | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
         "dataset": config.project_id,
         "reaction_type": config.reaction_name,
         "objective": config.objective_name,
         "goal": config.goal,
         "backend": "real_lab_ask_tell",
     }
+    # The agent's history holds completed runs only (it ranks them to find the best), so the
+    # failed and skipped ones are listed here: they are not proposed again, and the agent can
+    # read why they failed.
+    failed = (observations.failed_rows() if observations is not None else [])[-_FAILED_CONTEXT_LIMIT:]
+    if failed:
+        context["failed_conditions"] = [
+            {
+                "candidate": {name: row.get(name, "") for name in (variable_names or [])},
+                "status": str(row.get("status") or "").strip().lower(),
+                **({config.objective_name: row[config.objective_name]}
+                   if _clean(row.get(config.objective_name)) else {}),
+                **({"failure_reason": row["failure_reason"]} if _clean(row.get("failure_reason")) else {}),
+            }
+            for row in failed
+        ]
+        context["failed_conditions_policy"] = (
+            "these conditions may be proposed again (repeat_failed_conditions)"
+            if config.repeat_failed_conditions
+            else "these conditions are excluded from new batches"
+        )
+    return context
 
 
 def _lab_search_space_meta(
@@ -1971,25 +2100,48 @@ def _check_upload_size(text: str | None, name: str) -> None:
         raise ValueError(f"The {name} is larger than {MAX_UPLOAD_PART_BYTES // (1024 * 1024)} MB.")
 
 
-def _drop_config_keys(folder: Path, keys: list[str]) -> Path | None:
-    """Remove unknown settings from project.yaml after a backup; returns the backup path."""
-    if not keys:
-        return None
+def _rewrite_project_yaml(
+    folder: Path, *, drop: list[str], updates: dict[str, Any]
+) -> tuple[Path | None, dict[str, Any]]:
+    """Before registering: remove unknown settings (`drop`) and change editable ones (`updates`) in
+    project.yaml after one backup. Returns the backup path and {setting: {old, new}}."""
+    if not drop and not updates:
+        return None, {}
     path = folder / "project.yaml"
     payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} is not a mapping of settings.")
     known = {item.name for item in fields(ProjectConfig)}
-    for key in keys:
+    for key in drop:
         if key in known:
-            raise ValueError(f"`{key}` is a TRACE setting; change it with the settings API instead of dropping it.")
+            raise ValueError(f"`{key}` is a TRACE setting; change it with set_config instead of dropping it.")
         if key not in payload:
             raise ValueError(f"`{key}` is not in {path}.")
+    values: dict[str, Any] = {}
+    if updates:
+        locked = sorted(set(updates) & set(LOCKED_CONFIG_FIELDS))
+        if locked:
+            raise ValueError(f"{', '.join(locked)} can't be changed: the project's observations depend on them.")
+        unknown = sorted(set(updates) - set(EDITABLE_CONFIG_FIELDS))
+        if unknown:
+            raise ValueError(
+                f"Unknown or non-editable settings in set_config: {', '.join(unknown)}. "
+                f"Editable settings: {', '.join(EDITABLE_CONFIG_FIELDS)}."
+            )
+        try:
+            current = ProjectConfig(**{key: value for key, value in payload.items() if key in known})
+        except Exception:  # noqa: BLE001 -- a malformed value is reported by the check
+            current = ProjectConfig(project_id=folder.name)
+        values = _parse_config_updates(updates, current=current)
     backup_dir = _unique_backup_dir(folder.parent / "_backups" / f"{folder.name}_config_{_timestamp_for_path()}")
     backup_dir.mkdir(parents=True)
     backup = backup_dir / "project.yaml"
     shutil.copy2(path, backup)
-    kept = {key: value for key, value in payload.items() if key not in set(keys)}
+    kept = {key: value for key, value in payload.items() if key not in set(drop)}
+    changes = {name: {"old": kept.get(name), "new": value} for name, value in values.items() if kept.get(name) != value}
+    kept.update(values)
     path.write_text(yaml.safe_dump(kept, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    return backup
+    return backup, changes
 
 
 def _existing_absolute_folder(path: str | Path) -> Path:
@@ -2029,7 +2181,10 @@ def _descriptor_ineligibility_error(eligibility: dict[str, Any]) -> str:
         reasons.append(f"`{variable}` has options with identical descriptor rows ({same})")
     missing = eligibility.get("missing_descriptor_variables") or []
     if missing:
-        reasons.append(f"no complete numeric descriptors for {', '.join(f'`{name}`' for name in missing)}")
+        reasons.append(
+            f"no complete numeric descriptors for {', '.join(f'`{name}`' for name in missing)} (numeric "
+            "variables use their own values; each categorical one needs a descriptor table)"
+        )
     if not reasons:
         reasons.append("no categorical variable has descriptors")
     return (
@@ -2096,13 +2251,16 @@ def _candidate_pool_items(
     static_conditions: dict[str, str] | None = None,
     max_items: int,
     proposed_by: list[str] | None = None,
+    estimates: list[dict[str, float]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the planner shortlist; `proposed_by[i]` tags raw candidate i with the
-    acquisition(s) that proposed it (chunked_gp), and is shown to the LLM."""
+    acquisition(s) that proposed it (chunked_gp), and is shown to the LLM. `estimates[i]` is the
+    model's prediction for it (chunked_gp), kept as `model_estimate` for the recommendation."""
     items: list[dict[str, Any]] = []
     seen: set[tuple[str, ...]] = set()
     static = dict(static_conditions or {})
     tags = list(proposed_by or [])
+    predictions = list(estimates or [])
     for raw_index, raw_candidate in enumerate(raw_candidates):
         optimizer_candidate = _candidate_to_dict(raw_candidate, param_space)
         candidate = _lab_display_candidate(
@@ -2128,9 +2286,37 @@ def _candidate_pool_items(
         )
         if raw_index < len(tags) and tags[raw_index]:
             items[-1]["proposed_by"] = str(tags[raw_index])
+        if raw_index < len(predictions) and isinstance(predictions[raw_index], dict):
+            items[-1]["model_estimate"] = dict(predictions[raw_index])
         if len(items) >= max(1, int(max_items)):
             break
     return items
+
+
+def _attach_model_estimates(
+    recommendations: list[dict[str, Any]],
+    candidate_pool: list[dict[str, Any]],
+    design_space: DesignSpace,
+    variable_names: list[str],
+) -> None:
+    """Give each recommendation the planner's prediction for its condition (chunked_gp), so "why
+    this one?" can be answered with a predicted value and its uncertainty."""
+    by_key: dict[tuple[str, ...], dict[str, Any]] = {}
+    for item in candidate_pool:
+        if item.get("model_estimate"):
+            try:
+                by_key[_optimization_key(design_space, item["candidate"], variable_names)] = item["model_estimate"]
+            except ValueError:
+                continue
+    if not by_key:
+        return
+    for recommendation in recommendations:
+        try:
+            estimate = by_key.get(_optimization_key(design_space, recommendation.get("candidate") or {}, variable_names))
+        except ValueError:
+            continue
+        if estimate:
+            recommendation["model_estimate"] = dict(estimate)
 
 
 def _attach_descriptor_context(
@@ -2299,6 +2485,7 @@ def _bo_only_recommendations(
     planner_error: str,
     evidence_cards: list[Any],
     created_at: str,
+    objective_name: str = "result",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     recommendations: list[dict[str, Any]] = []
     trace_records: list[dict[str, Any]] = []
@@ -2314,7 +2501,7 @@ def _bo_only_recommendations(
             planner_name=planner_name,
             evidence_cards=evidence_cards,
             planner_error=planner_error,
-        )
+        ) + _estimate_sentence(item, planner_name, planner_diagnostics, objective_name)
         trace = {
             "run_mode": "lab_ask",
             "round_id": round_id,
@@ -2485,7 +2672,9 @@ def _campaign_from_observations(
     campaign = Campaign()
     campaign.set_param_space(param_space)
     campaign.set_value_space(value_space)
-    for row in observations.completed_rows(objective_name):
+    # Completed runs plus failed runs reported with a number: a measured failure tells the
+    # model that region is poor.
+    for row in observations.model_rows(objective_name):
         candidate = _optimizer_candidate_values(
             design_space,
             row,
@@ -2597,10 +2786,14 @@ def _observation_candidate_keys(
     observations: ObservationTable,
     design_space: DesignSpace,
     variable_names: list[str],
+    *,
+    include_failed: bool = False,
 ) -> set[tuple[str, ...]]:
+    """Condition keys of the observed runs. `include_failed` adds failed and skipped runs (an ask
+    excludes those too); the import duplicate check leaves them out, so a retry can be imported."""
     keys: set[tuple[str, ...]] = set()
     for row in observations.rows:
-        if str(row.get("status", "")).strip().lower() in {"failed", "skipped"}:
+        if not include_failed and str(row.get("status", "")).strip().lower() in {"failed", "skipped"}:
             continue
         try:
             keys.add(_optimization_key(design_space, row, variable_names))
@@ -2676,6 +2869,30 @@ def _exclude_candidate_keys(
         normalize_value=_normalize_condition_value,
         check=_constraint,
     )
+
+
+def _estimate_sentence(
+    item: dict[str, Any],
+    planner_name: str,
+    planner_diagnostics: dict[str, Any] | None,
+    objective_name: str,
+) -> str:
+    """One sentence on why the planner picked this condition (bo_only has no agent to explain it)."""
+    estimate = item.get("model_estimate") or {}
+    proposer = str(item.get("proposed_by") or "").strip().lower()
+    if estimate:
+        text = (
+            f" Model prediction for this condition: {objective_name} ≈ {float(estimate['predicted']):.3g} "
+            f"± {float(estimate['uncertainty']):.3g} (1 sd)"
+        )
+        if proposer and proposer != "random":
+            text += f"; picked by {proposer.upper()}, which weighs the prediction against its uncertainty"
+        return text + "."
+    if (planner_diagnostics or {}).get("selection_mode") == "random_initial_design":
+        return " Seeded random initial design: fewer than two different results so far, so no model prediction yet."
+    if planner_name != "chunked_gp":
+        return f" The {planner_name} planner gives no per-condition prediction."
+    return ""
 
 
 def _build_lab_rationale(

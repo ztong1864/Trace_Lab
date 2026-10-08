@@ -167,7 +167,8 @@
 | `config.objective_name` | `string` | 否 | 优化目标名称（默认 "yield"） |
 | `config.goal` | `string` | 否 | "maximize" 或 "minimize"（默认 "maximize"） |
 | `config.batch_size` | `integer` | 否 | 每批推荐数量（默认 6） |
-| `config.planner_name` | `string` | 否 | 优化器：atlas / random（默认 "atlas"） |
+| `config.planner_name` | `string` | 否 | 优化器：chunked_gp / atlas / random（默认 "chunked_gp"；Atlas 在超过 10 万种组合时可能很久跑不完，这时 ask 本轮自动改用 chunked_gp） |
+| `config.repeat_failed_conditions` | `boolean` | 否 | 是否允许再次推荐 skipped 和没有测量值的 failed 条件（默认 false：不再推荐）；带测量值的 failed（如 yield 0）和 completed 一样不会重复 |
 | `config.seed` | `integer` | 否 | 随机种子（默认 7） |
 | `config.reaction_scope` | `string` | 否 | 反应范围描述，用于证据匹配 |
 | `config.controller_mode` | `string` | 否 | "agentic" / "bo_only"（默认 "agentic"） |
@@ -253,10 +254,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `batch_size` | `integer` | 否 | 本批推荐数量（不填则使用项目默认值） |
-| `planner_name` | `string` | 否 | atlas / random（不填则使用项目默认值） |
+| `planner_name` | `string` | 否 | chunked_gp / atlas / random（不填则使用项目设置；项目设置是 atlas 且组合数超过 10 万时，本轮改用 chunked_gp 并在响应的 `planner_switched` 里说明；请求里明确写 atlas 则照用） |
 | `controller_mode` | `string` | 否 | agentic / bo_only（不填则使用项目默认值） |
 | `agent_config_path` | `string` | 否 | agent 配置文件路径 |
 | `planner_use_descriptors` | `boolean` | 否 | 是否启用描述符增强 |
+| `llm` | `object` | 否 | 调用方自己的 LLM：`{"api_key": "...", "base_url": "...", "model": "..."}`（后两项可省略）。agentic 步骤用这把 key，而不是服务器的 `OPENAI_API_KEY`；只用于本次请求，不写入任何文件或日志。给出 `model` 时不使用配置里的备用模型 |
 
 **两种控制模式说明**:
 - **agentic**: BO 优化器生成候选池后，经 LLM 智能体决策层审查、组合，生成带策略说明的批次推荐。
@@ -302,15 +304,17 @@
 | `project` | `object` | 项目配置快照 |
 | `round_id` | `string` | 本轮标识（如 round_003） |
 | `controller_mode` | `string` | 实际使用的控制模式 |
-| `planner_use_descriptors` | `boolean` | 是否启用了描述符 |
+| `llm_source` | `string` | agentic 步骤用的 key：`request`（请求里的 `llm`）/ `server`（服务器的 `OPENAI_API_KEY`）/ `none`（bo_only） |
+| `planner_use_descriptors` | `boolean` | 是否启用了描述符（类别变量需要描述符表；数值变量没有表时用自身的数值） |
+| `planner_switched` | `object` | 仅在自动换优化器时出现：`{from, to, combinations, message}` |
 | `recommendations` | `array` | 推荐实验列表 |
 | `recommendations[].recommendation_id` | `string` | 推荐唯一标识 |
 | `recommendations[].round_id` | `string` | 所属轮次标识 |
 | `recommendations[].role` | `string` | 策略角色：exploit / explore / diversity / scaffold |
 | `recommendations[].rationale` | `string` | 推荐理由说明（agentic 模式下由 LLM 生成） |
 | `recommendations[].candidate` | `object` | 实验条件键值对 |
-| `recommendations[].predicted_value` | `float` | 预测的目标值 |
-| `recommendations[].uncertainty` | `float` | 预测的不确定性 |
+| `recommendations[].model_estimate` | `object` | chunked_gp 的模型预测：`predicted`（目标值）、`uncertainty`（1 个标准差），单位同目标值；随机初始设计和 Atlas 没有此字段 |
+| `recommendations[].proposed_by` | `string` | 选出它的采集函数：ei / ucb / ei+ucb / random |
 | `recommendations[].status` | `string` | pending / completed / failed / skipped |
 | `recommendations[].created_at` | `string` | 推荐生成时间 |
 | `trace_path` | `string` | 决策追踪文件路径 (.jsonl) |
@@ -364,10 +368,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `defer_reflection` | `boolean` | 否 | 是否延迟反思（默认 false，同步完成） |
+| `llm` | `object` | 否 | 同 ask：反思（包括延迟反思）用调用方自己的 key；响应里的 `llm_source` 说明用了哪把 key |
 | `results` | `array` | 是 | 实验结果列表 |
 | `results[].recommendation_id` | `string` | 是 | 对应的推荐标识 |
-| `results[].{objective_name}` | `float` | 条件 | 目标值（如 yield），completed 时必填 |
-| `results[].status` | `string` | 是 | completed / failed / skipped |
+| `results[].{objective_name}` | `float` | 条件 | 目标值（如 yield），completed 时必填；failed 时如果测到了数值（例如没有产物，yield 0）也请填写，模型会从中学习，没有测量就不填 |
+| `results[].status` | `string` | 是 | completed / failed / skipped。failed 和 skipped 的条件之后不再推荐（除非项目设置 `repeat_failed_conditions: true`） |
 | `results[].failure_reason` | `string` | 否 | 失败原因（failed 时建议填写） |
 | `results[].notes` | `string` | 否 | 实验备注 |
 | `results[].observed_at` | `string` | 否 | 实验观测时间（ISO 8601） |
@@ -565,7 +570,7 @@
 | `reaction_scope` | `string` | 反应范围，用于匹配当前项目 |
 | `variable_scope` | `array` | 涉及的设计变量 |
 | `target_nodes` | `array` | 适用的决策节点 |
-| `mapping_status` | `string` | 映射状态：direct / same_start_end / same_reaction_family / variable_level / background |
+| `mapping_status` | `string` | 映射状态：direct / same_start_end / same_reaction_family / variable_level / background / out_of_scope。别名 same_redox_manifold、same_reaction 按 same_reaction_family 处理（direct / same_start_end 由化学家判定） |
 | `confidence` | `string` | 置信度：high / medium / low |
 | `allowed_use` | `string` | 允许的使用方式：advisory / decision_active |
 | `source_type` | `string` | 来源类型：literature / expert / curated |

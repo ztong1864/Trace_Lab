@@ -1037,6 +1037,93 @@ class ConcurrentAskTests(unittest.TestCase):
             )
 
 
+class CallerLLMKeyTests(unittest.TestCase):
+    """`llm` in ask/tell: the caller's own key for the agentic steps, this request only, never stored."""
+
+    SECRET = "sk-caller-secret-12345"
+
+    def test_decision_engine_uses_the_callers_key_endpoint_and_model(self):
+        from chem_agent_bo.agent.decision_engine import DecisionEngine
+
+        config = lab_service._load_agentic_config("configs/agent_bo.yaml", project_dir=PROJECT_ROOT)
+        captured: dict = {}
+
+        def capture(model_kwargs):
+            captured.update(model_kwargs)
+            return collections.defaultdict(mock.MagicMock)
+
+        llm = {"api_key": self.SECRET, "base_url": "https://llm.example/v1", "model": "caller-model"}
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "server-key"}), mock.patch.object(
+            DecisionEngine, "_build_agent_bundle", side_effect=capture
+        ):
+            engine = lab_service._build_decision_engine(config, llm)
+        self.assertEqual(captured["api_key"], self.SECRET)
+        self.assertEqual(captured["base_url"], "https://llm.example/v1")
+        self.assertEqual(captured["model"], "caller-model")
+        self.assertIsNone(engine._fallback_model_name)  # the configured fallback may not exist on that endpoint
+
+        captured.clear()
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "server-key"}), mock.patch.object(
+            DecisionEngine, "_build_agent_bundle", side_effect=capture
+        ):
+            lab_service._build_decision_engine(config)
+        self.assertEqual(captured["api_key"], "server-key")
+
+    def test_llm_is_checked(self):
+        self.assertIsNone(lab_service._normalize_llm(None))
+        self.assertIsNone(lab_service._normalize_llm({}))
+        with self.assertRaisesRegex(ValueError, "api_key"):
+            lab_service._normalize_llm({"model": "m"})
+        with self.assertRaisesRegex(ValueError, "unknown fields"):
+            lab_service._normalize_llm({"api_key": "k", "temperature": 1})
+        with self.assertRaisesRegex(ValueError, "object"):
+            lab_service._normalize_llm("k")
+
+    def test_api_passes_llm_to_ask_tell_and_the_deferred_reflection(self):
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:  # pragma: no cover
+            self.skipTest("fastapi test client unavailable")
+        llm = {"api_key": self.SECRET, "model": "caller-model"}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            LabBOService, "ask", return_value={"round_id": "round_001"}
+        ) as ask, mock.patch.object(
+            LabBOService, "tell", return_value={"reflection_recommendation_ids": ["round_001_rec_001"]}
+        ) as tell, mock.patch.object(LabBOService, "reflect_completed_recommendations", return_value={}) as reflect:
+            client = TestClient(create_app(tmp))
+            self.assertEqual(client.post("/api/projects/p/ask", json={"llm": llm}).status_code, 200)
+            response = client.post("/api/projects/p/tell",
+                                   json={"results": [{"recommendation_id": "round_001_rec_001"}],
+                                         "defer_reflection": True, "llm": llm})
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(ask.call_args.kwargs["llm"], llm)
+        self.assertEqual(tell.call_args.kwargs["llm"], llm)
+        self.assertEqual(reflect.call_args.kwargs["llm"], llm)
+
+    def test_tell_reports_the_key_source_and_never_stores_the_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = LabBOService(projects_root=tmp)
+            project = _create_small_project(service, "keys", planner_name="random", batch_size=2)
+            asked = service.ask("keys", llm={"api_key": self.SECRET})
+            self.assertEqual(asked["llm_source"], "none")  # bo_only uses no LLM
+            config = project.load_config()
+            config.controller_mode = "agentic"
+            project.write_config(config)
+            recs = project.load_batches()[-1].recommendations
+            build = mock.MagicMock(return_value=None)
+            with mock.patch.multiple(lab_service, _build_decision_engine=build,
+                                     _build_lab_controller_runtime=mock.MagicMock(
+                                         return_value=_ScriptedReflectionRuntime(set()))):
+                told = service.tell("keys", llm={"api_key": self.SECRET},
+                                    results=[{"recommendation_id": rec["recommendation_id"], "yield": "10",
+                                              "status": "completed"} for rec in recs])
+            self.assertEqual(told["llm_source"], "request")
+            self.assertEqual(build.call_args.args[1], {"api_key": self.SECRET})
+            for path in Path(tmp).rglob("*"):
+                if path.is_file():
+                    self.assertNotIn(self.SECRET, path.read_text(encoding="utf-8", errors="ignore"), str(path))
+
+
 if __name__ == "__main__":
     unittest.main()
 

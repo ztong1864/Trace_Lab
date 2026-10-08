@@ -106,6 +106,7 @@ def create_app(projects_root: str | Path):
                 payload.get("path"),
                 handle=payload.get("handle") or None,
                 drop_config_keys=list(payload.get("drop_config_keys") or []),
+                set_config=payload.get("set_config"),
             )
         except ProjectCheckError as exc:
             raise HTTPException(status_code=400, detail={"message": str(exc), "check": exc.report}) from exc
@@ -205,6 +206,8 @@ def create_app(projects_root: str | Path):
                 controller_mode=payload.get("controller_mode"),
                 agent_config_path=payload.get("agent_config_path") or payload.get("agent_config"),
                 planner_use_descriptors=payload.get("planner_use_descriptors"),
+                # {api_key, base_url?, model?}: the caller's own LLM key for the agentic steps, this request only.
+                llm=payload.get("llm"),
             )
         except ProjectBusyError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -243,10 +246,12 @@ def create_app(projects_root: str | Path):
     ) -> dict[str, Any]:
         try:
             defer_reflection = bool(payload.get("defer_reflection", False))
+            llm = payload.get("llm")
             response = service.tell(
                 project_id,
                 results=list(payload.get("results") or []),
                 reflect_results=not defer_reflection,
+                llm=llm,
             )
             reflection_ids = list(response.get("reflection_recommendation_ids") or [])
             if defer_reflection and reflection_ids:
@@ -254,6 +259,7 @@ def create_app(projects_root: str | Path):
                     service.reflect_completed_recommendations,
                     project_id,
                     recommendation_ids=reflection_ids,
+                    llm=llm,
                 )
             return response
         except Exception as exc:  # noqa: BLE001

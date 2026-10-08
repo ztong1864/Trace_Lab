@@ -25,13 +25,19 @@ class ProjectConfig:
     objective_name: str = "yield"
     goal: str = "maximize"
     batch_size: int = 6
-    planner_name: str = "atlas"
+    # chunked_gp scores a million combinations in seconds; Atlas can take many minutes or
+    # never finish on large spaces (an ask above ATLAS_LARGE_SPACE runs chunked_gp instead).
+    planner_name: str = "chunked_gp"
     # Honored by the "atlas" and "chunked_gp" planners, which each validate it
     # against their own supported set when a batch is requested.
     acquisition_function: str = "ei"
     # When the planner fails, either fall back to random candidates (flagged with
     # a warning) or, if False, fail the ask without writing a batch.
     allow_random_fallback: bool = True
+    # Failed and skipped conditions are not proposed again unless this is true (for example to
+    # retry runs that failed for an equipment problem). A failure reported with a number (e.g.
+    # yield 0) is a measured result and is never repeated, like a completed run.
+    repeat_failed_conditions: bool = False
     # Per-planner settings, e.g. {"chunked_gp": {"min_changed_variables": 3,
     # "max_scan_size": 50000000, "finalist_count": 2000}}. Only the entry for the
     # planner in use applies; it is validated when a batch is requested.
@@ -58,9 +64,10 @@ class ProjectConfig:
             objective_name=str(self.objective_name or "yield"),
             goal="minimize" if str(self.goal).lower().startswith("min") else "maximize",
             batch_size=max(1, int(self.batch_size or 1)),
-            planner_name=str(self.planner_name or "atlas").strip().lower(),
+            planner_name=str(self.planner_name or "chunked_gp").strip().lower(),
             acquisition_function=str(self.acquisition_function or "ei").strip().lower(),
             allow_random_fallback=_parse_bool(self.allow_random_fallback, default=True),
+            repeat_failed_conditions=_parse_bool(self.repeat_failed_conditions, default=False),
             planner_options=dict(self.planner_options or {}),
             seed=7 if self.seed in (None, "") else int(self.seed),
             reaction_scope=str(self.reaction_scope or ""),
@@ -163,6 +170,25 @@ class ObservationTable:
                 continue
             completed.append(row)
         return completed
+
+    def model_rows(self, objective_name: str) -> list[dict[str, Any]]:
+        """Rows the optimizer learns from: completed runs plus failed runs reported with a number
+        (e.g. yield 0 when no product formed). A failed run without a number (an equipment problem)
+        teaches nothing; best_so_far still counts completed runs only."""
+        rows = []
+        for row in self.rows:
+            status = str(row.get("status", "completed")).strip().lower()
+            if status not in {"completed", "failed"}:
+                continue
+            try:
+                float(_clean(row.get(objective_name)))
+            except ValueError:
+                continue
+            rows.append(row)
+        return rows
+
+    def failed_rows(self) -> list[dict[str, Any]]:
+        return [row for row in self.rows if str(row.get("status", "")).strip().lower() in {"failed", "skipped"}]
 
     def candidate_keys(self, variable_names: list[str]) -> set[tuple[str, ...]]:
         keys = set()

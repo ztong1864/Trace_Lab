@@ -25,10 +25,12 @@ from chem_agent_bo.lab.evidence import (
     SELECTION_MODES,
     EvidenceStore,
     _card_from_dict,
+    normalize_mapping_status,
     retrieval_preview,
 )
 from chem_agent_bo.lab.project import ObservationTable, ProjectConfig
 from chem_agent_bo.lab.service import (
+    ATLAS_LARGE_SPACE,
     LAB_DESCRIPTOR_PLANNERS,
     _canonical_design_value,
     _descriptor_ineligibility_error,
@@ -36,8 +38,6 @@ from chem_agent_bo.lab.service import (
     _validate_project_config,
 )
 
-# Above this many combinations Atlas's optimizer takes many minutes or never finishes.
-ATLAS_LARGE_SPACE = 100_000
 OBSERVATION_STATUSES = {"completed", "failed", "skipped", "pending"}
 _ROUND_FILE = re.compile(r"^recommendations_round_(\d+)\.json$")
 _HISTORICAL_ROW = re.compile(r"^Historical row \d+ ")
@@ -118,7 +118,12 @@ def _check_config(folder: Path, report: _Report) -> ProjectConfig | None:
     try:
         _validate_project_config(config, project_dir=folder)
     except ValueError as exc:
-        report.error("project.yaml", str(exc))
+        hint = ""
+        if "Agent config" in str(exc):
+            # Typical for a folder copied from another server: the path points at that machine.
+            hint = (' Register with set_config={"agent_config_path": "configs/agent_bo.yaml"} to use this '
+                    "TRACE's default agent config.")
+        report.error("project.yaml", str(exc) + hint)
     report.facts.update(
         {
             "project_id": config.project_id,
@@ -160,8 +165,9 @@ def _check_design_space(folder: Path, config: ProjectConfig | None, report: _Rep
     if config.planner_name == "atlas" and combinations is not None and combinations > ATLAS_LARGE_SPACE:
         report.warn(
             "project.yaml",
-            f"Atlas on {combinations:,} combinations can take many minutes or not finish; "
-            "planner_name: chunked_gp scores every combination in seconds.",
+            f"Atlas on {combinations:,} combinations can take many minutes or not finish, so each ask "
+            "runs chunked_gp instead (unless the ask names atlas); set planner_name: chunked_gp to say so "
+            "in project.yaml.",
         )
     return design
 
@@ -301,6 +307,7 @@ def _check_evidence(
     ids: Counter[str] = Counter()
     # Summarized per issue rather than per card: projects commonly have 100+ cards.
     bad_statuses: dict[str, list[str]] = {}
+    aliased: dict[str, dict[str, Any]] = {}
     unknown_scope: dict[str, list[str]] = {}
     for line, card in cards:
         card_id = str(card.get("card_id") or card.get("id") or "").strip()
@@ -308,15 +315,22 @@ def _check_evidence(
             report.error(filename, "Card without card_id.", line)
             continue
         ids[card_id] += 1
-        status = str(card.get("mapping_status") or "background").strip().lower()
-        if status not in ALLOWED_MAPPING_STATUSES:
-            bad_statuses.setdefault(status, []).append(card_id)
+        raw_status = str(card.get("mapping_status") or "background").strip().lower()
+        status, known = normalize_mapping_status(raw_status)
+        if not known:
+            bad_statuses.setdefault(raw_status, []).append(card_id)
+        elif status != raw_status:
+            entry = aliased.setdefault(raw_status, {"read_as": status, "card_count": 0})
+            entry["card_count"] += 1
         scope = card.get("variable_scope") or []
         names = [item.strip() for item in scope.replace(";", ",").split(",")] if isinstance(scope, str) else scope
         for name in names:
             name = str(name).strip()
             if name and known_variables and name not in known_variables:
                 unknown_scope.setdefault(name, []).append(card_id)
+    if aliased:
+        # Words from other card-writing guides (e.g. same_redox_manifold): fine, reported as a fact.
+        report.facts["mapping_status_aliases"] = aliased
     for status, card_ids in sorted(bad_statuses.items()):
         report.warn(
             filename,

@@ -87,6 +87,14 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Unknown project.yaml setting to remove (backed up first); repeatable. --path only.",
     )
+    register_parser.add_argument(
+        "--set-config",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Editable setting to change before the check, e.g. agent_config_path=configs/agent_bo.yaml "
+        "(VALUE is read as JSON when it parses, so batch_size=4 is a number); repeatable. --path only.",
+    )
     register_parser.add_argument("--dry-run", action="store_true", help="With --scan: check only, register nothing.")
 
     unregister_parser = subparsers.add_parser("unregister", help="Forget a registered project (files untouched).")
@@ -260,6 +268,7 @@ def main() -> None:
                         Path(args.path).resolve(),
                         handle=args.handle,
                         drop_config_keys=args.drop_config_key,
+                        set_config=_key_values(args.set_config) or None,
                     )
                 )
             except ProjectCheckError as exc:
@@ -494,6 +503,20 @@ def _config_from_args(args: argparse.Namespace) -> ProjectConfig:
 
 def _print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _key_values(items: list[str]) -> dict[str, Any]:
+    """KEY=VALUE pairs; VALUE is JSON when it parses (4, true, {...}), otherwise the plain string."""
+    values: dict[str, Any] = {}
+    for item in items:
+        key, sep, raw = str(item).partition("=")
+        if not sep or not key.strip():
+            raise SystemExit(f"--set-config needs KEY=VALUE, got `{item}`.")
+        try:
+            values[key.strip()] = json.loads(raw)
+        except json.JSONDecodeError:
+            values[key.strip()] = raw
+    return values
 
 
 if __name__ == "__main__":

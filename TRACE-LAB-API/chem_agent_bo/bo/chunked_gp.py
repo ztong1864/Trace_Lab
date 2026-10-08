@@ -188,6 +188,7 @@ class ChunkedGPPlanner(BasePlanner):
             stats.update(
                 selection_mode=selection_mode,
                 pick_acquisitions=pick_acquisitions,
+                pick_estimates=self._pick_estimates(space, posterior, chosen),
                 scan_mode=scan_mode,
                 scanned_count=int(scanned),
                 chunk_size=self._chunk_size,
@@ -560,6 +561,27 @@ class ChunkedGPPlanner(BasePlanner):
         chosen = [int(merged[i]) for i in order[:size]]
         return chosen, ["+".join(proposers[index]) for index in chosen]
 
+    def _pick_estimates(
+        self, space: dict[str, Any], posterior: "_LatentPosterior", chosen: list[int]
+    ) -> list[dict[str, float]]:
+        """The model's predicted objective (posterior mean before the batch is fantasized) and its
+        uncertainty (1 sd) for each pick, in the objective's own units, so a chemist can be told why
+        a candidate was proposed. The picks themselves are chosen by the acquisition function."""
+        if not chosen:
+            return []
+        with torch.no_grad():
+            mean, cov = posterior.mean_cov(
+                self._features(self._decode(np.asarray(chosen, dtype=np.int64), space), space["blocks"])
+            )
+        sign = -1.0 if self._goal == "minimize" else 1.0  # the GP was fit on -y for minimize
+        return [
+            {
+                "predicted": round(sign * (float(m) * posterior.y_std + posterior.y_mean), 4),
+                "uncertainty": round(max(float(v), 0.0) ** 0.5 * posterior.y_std, 4),
+            }
+            for m, v in zip(mean.tolist(), torch.diagonal(cov).tolist(), strict=True)
+        ]
+
     def _to_parameter_vector(self, index: int, space: dict[str, Any], subspace):  # noqa: ANN001, ANN202
         return ParameterVector().from_dict(self._candidate(index, space), param_space=subspace)
 
@@ -586,6 +608,10 @@ class _LatentPosterior:
             resid = (model.train_targets - prior_mean).unsqueeze(-1)
             alpha = torch.cholesky_solve(resid, chol).squeeze(-1)
             self.best_f = model.train_targets.max()
+            # Standardize's shift and scale, to report predictions in the objective's units.
+            transform = getattr(model, "outcome_transform", None)
+            self.y_mean = float(transform.means.reshape(-1)[0]) if transform is not None else 0.0
+            self.y_std = float(transform.stdvs.reshape(-1)[0]) if transform is not None else 1.0
         self._kernel = model.covar_module
         self._train_x, self._chol, self._alpha, self._prior_mean = train_x, chol, alpha, prior_mean
         self._score_kernel = copy.deepcopy(model.covar_module).to(score_dtype)
