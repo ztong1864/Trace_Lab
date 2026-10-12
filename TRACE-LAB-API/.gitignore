@@ -14,3 +14,4 @@ tmp/
 temp/
 run_local.ps1
 start_trace_lab.cmd
+_backups/
