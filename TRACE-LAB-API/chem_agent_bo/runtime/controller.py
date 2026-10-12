@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from chem_agent_bo.agent.action_package_policy import resolve_planner_action_policy
+from chem_agent_bo.agent.relations import relation_to_history
 from chem_agent_bo.state import OnlineDecisionState
 
 from .batch_composer import (
@@ -211,10 +212,14 @@ class ControllerRuntime:
         trace_records: list[dict[str, Any]] = []
         for rank, item in enumerate(selected_items, start=1):
             candidate = dict(item["candidate"])
+            # Duplicates and differences are computed here, not left to the LLM's own field-by-field
+            # comparison (it once called one-variable probes "exact repeats" of the best run).
+            relation = relation_to_history(candidate, history, goal=goal)
             semantic = self.decision_engine.semantic_assessment(
                 candidate=candidate,
                 decision_context=decision_context,
                 reaction_context=reaction_context,
+                relation=relation or None,
             )
             verification = None
             verification_mode = str(self.config.verification_mode or "off").strip().lower()
@@ -264,6 +269,7 @@ class ControllerRuntime:
                     "action_package": action_package,
                     "selection_trace": selection_trace,
                     "semantic_assessment": semantic,
+                    "relation_to_measured": relation,
                     "verification_pass": verification,
                     "evidence_trace": evidence_trace or {},
                 }

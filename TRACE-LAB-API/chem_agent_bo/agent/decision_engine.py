@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -361,30 +362,18 @@ class DecisionEngine:
             model_kwargs["api_key"] = api_key
         if resolved_base:
             model_kwargs["base_url"] = resolved_base
+        # Kept so a parameter the model rejects (e.g. `temperature` on gpt-6-luna) can be left out
+        # and the agents rebuilt once; see _drop_rejected_param.
+        self._model_kwargs = model_kwargs
+        self._primary_agents: dict[str, Any] = {}
+        self.dropped_params: list[str] = []
 
         if api_key:
-            primary_agents = self._build_agent_bundle(model_kwargs)
-            self.decision_agent = primary_agents["decision_action"]
-            self.completion_agent = primary_agents["completion_action"]
-            self.feasibility_agent = primary_agents["feasibility_action"]
-            self.reflection_agent = primary_agents["reflection_action"]
-            self.hypothesis_agent = primary_agents["hypothesis_action"]
-            self.diagnosis_agent = primary_agents["stagnation_diagnosis"]
-            self.semantic_assessment_agent = primary_agents["semantic_assessment"]
-            self.verification_agent = primary_agents["candidate_verification"]
-            self.coverage_agent = primary_agents["coverage_insight"]
-            self.intervention_agent = primary_agents["intervention_plan"]
-            self.shortlist_rerank_agent = primary_agents["shortlist_rerank"]
-            self.lab_batch_composition_agent = primary_agents["lab_batch_composition"]
-            self.init_design_agent = primary_agents["design_init_experiments"]
-            self.search_constraint_agent = primary_agents["generate_search_constraints"]
-            self.value_translation_agent = primary_agents["value_translation"]
+            self._assign_agents(self._build_agent_bundle(model_kwargs))
 
             self._fallback_agents: dict[str, Any] = {}
             if self._fallback_model_name and self._fallback_model_name != self.model_name:
-                fallback_kwargs = dict(model_kwargs)
-                fallback_kwargs["model"] = self._fallback_model_name
-                self._fallback_agents = self._build_agent_bundle(fallback_kwargs)
+                self._fallback_agents = self._build_fallback_bundle()
                 self._fallback_pricing_profile, self._fallback_llm_price = resolve_price(
                     model_name=self._fallback_model_name,
                     pricing_profile=pricing_profile,
@@ -413,6 +402,66 @@ class DecisionEngine:
                 "No API key found in OPENAI_API_KEY. "
                 "DecisionEngine will use fallback logic only."
             )
+
+    # Parameters a model may reject outright ("`temperature` is not supported for this model request").
+    _DROPPABLE_PARAMS = ("temperature", "reasoning_effort", "top_p")
+
+    def _assign_agents(self, bundle: dict[str, Any]) -> None:
+        self._primary_agents = bundle
+        self.decision_agent = bundle["decision_action"]
+        self.completion_agent = bundle["completion_action"]
+        self.feasibility_agent = bundle["feasibility_action"]
+        self.reflection_agent = bundle["reflection_action"]
+        self.hypothesis_agent = bundle["hypothesis_action"]
+        self.diagnosis_agent = bundle["stagnation_diagnosis"]
+        self.semantic_assessment_agent = bundle["semantic_assessment"]
+        self.verification_agent = bundle["candidate_verification"]
+        self.coverage_agent = bundle["coverage_insight"]
+        self.intervention_agent = bundle["intervention_plan"]
+        self.shortlist_rerank_agent = bundle["shortlist_rerank"]
+        self.lab_batch_composition_agent = bundle["lab_batch_composition"]
+        self.init_design_agent = bundle["design_init_experiments"]
+        self.search_constraint_agent = bundle["generate_search_constraints"]
+        self.value_translation_agent = bundle["value_translation"]
+
+    def _build_fallback_bundle(self) -> dict[str, Any]:
+        fallback_kwargs = dict(self._model_kwargs)
+        fallback_kwargs["model"] = self._fallback_model_name
+        return self._build_agent_bundle(fallback_kwargs)
+
+    @classmethod
+    def _rejected_param(cls, exc: Exception | None) -> str | None:
+        """The request parameter a 400 error says the model does not support, if it is one we can drop."""
+        if exc is None:
+            return None
+        message = str(exc)
+        if "400" not in message and "invalid_request" not in message.lower():
+            return None
+        patterns = (
+            r"['\"]param['\"]\s*:\s*['\"]([a-z_]+)['\"]",
+            r"GR_UNSUPPORTED_([A-Z_]+)",
+            r"`([a-z_]+)` is not supported",
+            r"[Uu]nsupported parameter:?\s*['\"`]?([a-z_]+)",
+        )
+        if not re.search(r"not supported|unsupported", message, re.IGNORECASE):
+            return None
+        for pattern in patterns:
+            match = re.search(pattern, message)
+            if match and match.group(1).lower() in cls._DROPPABLE_PARAMS:
+                return match.group(1).lower()
+        return None
+
+    def _drop_rejected_param(self, param: str, call_name: str) -> bool:
+        """Leave `param` out of every later request and rebuild the agents once; False if nothing to drop."""
+        if param in self.dropped_params or param not in self._model_kwargs:
+            return False
+        self._model_kwargs.pop(param)
+        self.dropped_params.append(param)
+        LOGGER.warning("Model %s rejected `%s` in %s; retrying without it.", self.model_name, param, call_name)
+        self._assign_agents(self._build_agent_bundle(self._model_kwargs))
+        if self._fallback_agents:
+            self._fallback_agents = self._build_fallback_bundle()
+        return True
 
     @staticmethod
     def _build_agent_bundle(model_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -683,6 +732,20 @@ class DecisionEngine:
         )
         if structured is not None:
             return structured
+        rejected = self._rejected_param(last_error)
+        if rejected and self._drop_rejected_param(rejected, call_name):
+            structured, retry_error = self._invoke_with_retries(
+                self._primary_agents.get(call_name, agent),
+                message_text,
+                call_name=call_name,
+                model_name=self.model_name,
+                pricing_profile=self.pricing_profile,
+                price=self._llm_price,
+                max_attempts=1,
+            )
+            if structured is not None:
+                return structured
+            last_error = retry_error or last_error
         fallback_agent = self._fallback_agents.get(call_name)
         if (
             fallback_agent is not None
@@ -2519,6 +2582,7 @@ Rules:
         candidate: dict[str, Any],
         decision_context: dict[str, Any],
         reaction_context: dict[str, Any],
+        relation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         node_view = self._node_state_view(decision_context, "semantic_assessment")
         knowledge_context, knowledge_meta = self._knowledge_for_prompt(node_view)
@@ -2537,6 +2601,7 @@ Rules:
                 force_translate_missing=False,
             ),
             skill_block=skill_block,
+            relation=relation,
         )
         fallback = SemanticAssessment()
         output = self._invoke_agent_structured(

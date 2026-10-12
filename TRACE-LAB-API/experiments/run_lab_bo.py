@@ -101,6 +101,16 @@ def parse_args() -> argparse.Namespace:
     _add_projects_root_arg(unregister_parser)
     unregister_parser.add_argument("--handle", required=True)
 
+    remove_all_parser = subparsers.add_parser(
+        "remove-all-projects",
+        help="Administrator clean-up: move every project of the projects root to _backups/ and unregister "
+        "registered ones. Lists only, unless --yes.",
+    )
+    _add_projects_root_arg(remove_all_parser)
+    remove_all_parser.add_argument("--keep", nargs="*", default=[], metavar="HANDLE", help="Projects to leave in place.")
+    remove_all_parser.add_argument("--yes", action="store_true", help="Really remove (otherwise only list).")
+    remove_all_parser.add_argument("--purge", action="store_true", help="Delete instead of moving to _backups/.")
+
     check_parser = subparsers.add_parser("check", help="Check a project folder for problems.")
     check_parser.add_argument("--project-dir", required=True)
 
@@ -380,6 +390,14 @@ def main() -> None:
         return
     if args.command == "unregister":
         _print_json(LabBOService(projects_root=args.projects_root).unregister_project(args.handle))
+        return
+    if args.command == "remove-all-projects":
+        result = LabBOService(projects_root=args.projects_root).remove_all_projects(
+            keep=list(args.keep), dry_run=not args.yes, purge=bool(args.purge)
+        )
+        _print_json(result)
+        if not args.yes:
+            print("Nothing was changed. Run again with --yes to remove these projects.")
         return
     raise ValueError(f"Unknown command: {args.command}")
 

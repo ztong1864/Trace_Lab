@@ -18,6 +18,8 @@
 | POST | `/api/projects/{project_id}/ask` | 生成实验批次推荐 |
 | POST | `/api/projects/{project_id}/tell` | 提交实验结果 |
 | POST | `/api/projects/{project_id}/reset` | 重置项目运行状态 |
+| DELETE | `/api/projects/{project_id}` | 删除项目根目录下的项目（移入 `_backups/`） |
+| POST | `/api/admin/projects/remove-all` | 管理员：清空项目根目录下的全部项目（默认关闭，需口令） |
 | GET | `/api/projects/{project_id}/recommendations` | 获取所有推荐批次 |
 | GET | `/api/projects/{project_id}/evidence` | 获取证据卡 |
 | GET | `/api/projects/{project_id}/observations` | 获取所有观测记录 |
@@ -305,6 +307,8 @@
 | `round_id` | `string` | 本轮标识（如 round_003） |
 | `controller_mode` | `string` | 实际使用的控制模式 |
 | `llm_source` | `string` | agentic 步骤用的 key：`request`（请求里的 `llm`）/ `server`（服务器的 `OPENAI_API_KEY`）/ `none`（bo_only） |
+| `llm_model` | `string` | 仅 agentic：agentic 步骤实际使用的模型 |
+| `llm_adjustments` | `array` | 仅 agentic：为让这个模型可用而做的调整。项目的 agent 配置按原样使用（要换模型参数就改配置文件）；只有模型以 400 拒绝某个参数（`temperature`、`reasoning_effort`、`top_p`）时，去掉该参数后重试一次，并在这里写明。tell 的响应同样包含这两个字段 |
 | `planner_use_descriptors` | `boolean` | 是否启用了描述符（类别变量需要描述符表；数值变量没有表时用自身的数值） |
 | `planner_switched` | `object` | 仅在自动换优化器时出现：`{from, to, combinations, message}` |
 | `recommendations` | `array` | 推荐实验列表 |
@@ -315,6 +319,8 @@
 | `recommendations[].candidate` | `object` | 实验条件键值对 |
 | `recommendations[].model_estimate` | `object` | chunked_gp 的模型预测：`predicted`（目标值）、`uncertainty`（1 个标准差），单位同目标值；随机初始设计和 Atlas 没有此字段 |
 | `recommendations[].proposed_by` | `string` | 选出它的采集函数：ei / ucb / ei+ucb / random |
+| `recommendations[].relation_to_measured` | `object` | 仅 agentic：由代码算出的与已测实验的关系：`exact_duplicate_of`（完全相同的已测实验，没有则为 null）、`closest_measured`（差异最少的已测实验及逐变量差异）。理由里的“Compared with the closest measured run …”一句来自这里 |
+| `recommendations[].semantic_assessment.consistency_warnings` | `array` | 仅在 LLM 评语与代码比较矛盾时出现（例如评语说“与已测条件完全相同”，实际有变量不同）；该评语不写进 `rationale`，同一条也列在 `planner_warnings` |
 | `recommendations[].status` | `string` | pending / completed / failed / skipped |
 | `recommendations[].created_at` | `string` | 推荐生成时间 |
 | `trace_path` | `string` | 决策追踪文件路径 (.jsonl) |
@@ -434,6 +440,14 @@
 | `reflections[].insight` | `string` | 反思洞察 |
 | `reflection_status` | `string` | completed / deferred / none |
 | `reflection_recommendation_ids` | `array` | 待后台完成的反思推荐 ID 列表 |
+
+---
+
+### `DELETE /api/projects/{project_id}`
+
+删除项目根目录（`runs/lab_projects`）下的项目：整个文件夹移到 `_backups/deleted_<项目>_<时间>/`，管理员可以移回恢复。原位登记的项目（`import_project`）不在这里删除，返回 400，提示改用 `DELETE /api/projects/{project_id}/registration`。有 ask 正在运行时返回 409，不存在时返回 404。
+
+响应：`{"handle": "...", "deleted": true, "backup_dir": "..."}`
 
 ---
 
@@ -737,6 +751,55 @@
 - `verification_pass` - 验证环节
 - `reflection_action` - 反思分析
 - `lab_batch_composition` - 实验室批次组装
+
+---
+
+## 管理员接口：清空全部项目
+
+### `POST /api/admin/projects/remove-all`
+
+一次清掉项目根目录下的所有项目，用于测试或换批次。只供管理员直接调用，不在 FounDryClaw 的 trace-collab 工具里。
+
+**启用**：在 TRACE 的 `.env` 里设置 `TRACE_ADMIN_TOKEN=<一段足够长的随机字符串>` 并重启 TRACE。没有设置时接口返回 404。请求头 `X-Trace-Admin-Token` 必须与之一致，否则返回 403。
+
+**请求体**：
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| `dry_run` | `true` | 只列出将要处理的项目，什么都不改 |
+| `confirm` | — | 正式执行时必须为 `"remove all projects"`，并同时传 `"dry_run": false`，否则返回 400 |
+| `keep` | `[]` | 保留的项目名 |
+| `purge` | `false` | `true` 时直接删除，不留备份 |
+
+**执行**（全有或全无）：
+- 有任何项目正在 ask 时返回 409，什么都不改；
+- 项目根目录下的项目移到 `_backups/remove_all_<时间>/`（`purge` 时直接删除）；
+- 原位登记的项目只从 `registry.yaml` 注销，它们在 FounDryClaw 用户工作区里的文件不动；
+- 根目录下不是项目的文件和文件夹只在 `skipped` 里列出，不处理；`_backups/` 不动。
+
+**响应**：`dry_run`、`purge`、`removed`（`handle`、`bytes`）、`unregistered`（`handle`、`project_dir`）、`kept`、`skipped`、`backup_dir`。
+
+**示例**（保留仓库自带的演示项目）：
+
+```bash
+# 先看清单
+curl -s -X POST http://127.0.0.1:8788/api/admin/projects/remove-all \
+  -H "Content-Type: application/json" -H "X-Trace-Admin-Token: $TRACE_ADMIN_TOKEN" \
+  -d '{"keep": ["oxidative_esterification_demo"]}'
+# 正式执行
+curl -s -X POST http://127.0.0.1:8788/api/admin/projects/remove-all \
+  -H "Content-Type: application/json" -H "X-Trace-Admin-Token: $TRACE_ADMIN_TOKEN" \
+  -d '{"keep": ["oxidative_esterification_demo"], "dry_run": false, "confirm": "remove all projects"}'
+```
+
+**命令行**（服务器上，不需要口令，TRACE 不运行也能用）：
+
+```bash
+python experiments/run_lab_bo.py remove-all-projects --projects-root runs/lab_projects --keep oxidative_esterification_demo        # 只列出
+python experiments/run_lab_bo.py remove-all-projects --projects-root runs/lab_projects --keep oxidative_esterification_demo --yes  # 执行
+```
+
+**恢复**：把 `_backups/remove_all_<时间>/<项目>/` 移回 `runs/lab_projects/`。登记的项目需要重新登记（FounDryClaw 里重新 `import_project`）。演示项目误删时，也可以用 `git checkout -- runs/lab_projects/oxidative_esterification_demo` 恢复。
 
 ---
 

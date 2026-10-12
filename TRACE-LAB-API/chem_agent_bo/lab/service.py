@@ -35,7 +35,8 @@ from chem_agent_bo.lab.project import (
     ProjectConfig,
     RecommendationBatch,
 )
-from chem_agent_bo.lab.registry import ProjectRegistry, default_handle, validate_handle
+from chem_agent_bo.agent.relations import claims_repeat, describe_differences, relation_sentence
+from chem_agent_bo.lab.registry import REGISTRY_FILENAME, ProjectRegistry, default_handle, validate_handle
 from chem_agent_bo.runtime import ActionCapabilityPolicy, ControllerRuntime, ControllerRuntimeConfig
 from chem_agent_bo.runtime.lab_evidence import LabEvidenceProvider
 from chem_agent_bo.utils.run_io import capture_third_party_output
@@ -519,6 +520,107 @@ class LabBOService:
         entry = self.registry.remove(handle)
         return {"handle": handle, "project_dir": entry.get("path", ""), "files_changed": False}
 
+    def delete_project(self, handle: str) -> dict[str, Any]:
+        """Remove a project that lives in the projects root: its folder moves to `_backups/`.
+
+        A registered (in-place) project is not deleted here: its files belong to whoever
+        registered it, so the caller is pointed at `/registration` instead.
+        """
+        if self.projects_root is None:
+            raise ValueError("No projects root configured.")
+        handle = validate_handle(handle)
+        if self.registry is not None and self.registry.resolve(handle) is not None:
+            raise ValueError(
+                f"`{handle}` is a registered project whose files live outside the projects root; "
+                f"unregister it with DELETE /api/projects/{handle}/registration instead."
+            )
+        folder = self.projects_root / handle
+        if not (folder / "project.yaml").exists():
+            raise FileNotFoundError(f"No project `{handle}` in the projects root.")
+        with _project_lock_or_busy(folder, "delete the project"):
+            backup_dir = _unique_backup_dir(
+                self.projects_root / "_backups" / f"deleted_{handle}_{_timestamp_for_path()}"
+            )
+            backup_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(folder), str(backup_dir))
+        return {"handle": handle, "deleted": True, "backup_dir": str(backup_dir)}
+
+    def remove_all_projects(
+        self,
+        *,
+        keep: list[str] | None = None,
+        dry_run: bool = True,
+        purge: bool = False,
+    ) -> dict[str, Any]:
+        """Administrator clean-up: remove every project of the projects root at once.
+
+        Projects in the root move to `_backups/remove_all_<time>/` (deleted outright with
+        `purge`); registered projects are only unregistered, their files are not touched;
+        anything else in the root is listed and left alone. All or nothing: when any project
+        has an ask running, nothing changes. `dry_run` (the default) only lists.
+        """
+        if self.projects_root is None or self.registry is None:
+            raise ValueError("No projects root configured.")
+        keep_set = {str(name) for name in (keep or [])}
+        root = self.projects_root
+        native: list[Path] = []
+        skipped: list[str] = []
+        if root.exists():
+            for path in sorted(root.iterdir()):
+                if path.name == "_backups" or path.name == REGISTRY_FILENAME or path.name.startswith("."):
+                    continue
+                if path.is_dir() and (path / "project.yaml").exists():
+                    native.append(path)
+                else:
+                    skipped.append(path.name)
+        registered = self.registry.entries()
+
+        def _size(folder: Path) -> int:
+            return sum(item.stat().st_size for item in folder.rglob("*") if item.is_file())
+
+        removed = [{"handle": path.name, "bytes": _size(path)} for path in native if path.name not in keep_set]
+        unregistered = [{"handle": handle, "project_dir": entry.get("path", "")}
+                        for handle, entry in registered.items() if handle not in keep_set]
+        kept = sorted(keep_set & ({path.name for path in native} | set(registered)))
+        result: dict[str, Any] = {
+            "dry_run": bool(dry_run), "purge": bool(purge), "removed": removed,
+            "unregistered": unregistered, "kept": kept, "skipped": skipped, "backup_dir": "",
+        }
+        if dry_run:
+            return result
+
+        targets = [path for path in native if path.name not in keep_set]
+        locked: list[threading.Lock] = []
+        busy: list[str] = []
+        lock_dirs = [*targets, *(Path(str(entry.get("path") or "")) for handle, entry in registered.items()
+                                 if handle not in keep_set and entry.get("path"))]
+        try:
+            for folder in lock_dirs:
+                lock = _project_ask_lock(folder)
+                if lock.acquire(blocking=False):
+                    locked.append(lock)
+                else:
+                    busy.append(folder.name)
+            if busy:
+                raise ProjectBusyError(
+                    f"An ask is running for {', '.join(sorted(busy))}; nothing was removed. Try again after it finishes."
+                )
+            if targets and not purge:
+                backup_dir = _unique_backup_dir(root / "_backups" / f"remove_all_{_timestamp_for_path()}")
+                backup_dir.mkdir(parents=True)
+                for folder in targets:
+                    shutil.move(str(folder), str(backup_dir / folder.name))
+                result["backup_dir"] = str(backup_dir)
+            elif targets:
+                for folder in targets:
+                    shutil.rmtree(folder)
+            for item in unregistered:
+                self.registry.remove(item["handle"])
+        finally:
+            for lock in locked:
+                lock.release()
+        return result
+
     def project_summary(self, project_id_or_dir: str | Path) -> dict[str, Any]:
         project_dir = self.project_path(project_id_or_dir)
         return {
@@ -957,6 +1059,7 @@ class LabBOService:
             "oracle_evaluation_disabled": True,
             "controller_mode": effective_controller_mode,
             "llm_source": _llm_source(llm) if effective_controller_mode == "agentic" else "none",
+            **_llm_report(decision_engine if effective_controller_mode == "agentic" else None),
             "planner_use_descriptors": effective_planner_descriptors,
             "planner_descriptor_eligibility": descriptor_eligibility,
             "planner_fallback": _planner_fallback_summary(
@@ -1149,6 +1252,7 @@ class LabBOService:
         knowledge_meta: dict[str, Any] = {}
         param_space = design_space.param_space()
         agentic_mode = str(config.controller_mode or "agentic").strip().lower() == "agentic"
+        decision_engine = None
         if reflect_results and agentic_mode:
             agent_config = _load_agentic_config(
                 config.agent_config_path,
@@ -1298,6 +1402,7 @@ class LabBOService:
             "reflection_errors": reflection_errors,
             "reflection_recommendation_ids": pending_reflection_ids,
             "llm_source": _llm_source(llm) if agentic_mode else "none",
+            **_llm_report(decision_engine),
         }
 
     def reflect_completed_recommendations(
@@ -1933,6 +2038,15 @@ def _build_decision_engine(config: AgenticBOConfig, llm: dict[str, str] | None =
     )
 
 
+def _llm_report(decision_engine: Any) -> dict[str, Any]:
+    """Model actually used by the agentic steps, and the parameters it rejected (left out of the retried calls)."""
+    if decision_engine is None:
+        return {}
+    adjustments = [f"{param} was rejected by model {decision_engine.model_name} and left out of the retried calls."
+                   for param in getattr(decision_engine, "dropped_params", []) or []]
+    return {"llm_model": decision_engine.model_name, "llm_adjustments": adjustments}
+
+
 def _build_lab_controller_runtime(
     *,
     agent_config: AgenticBOConfig,
@@ -2390,10 +2504,21 @@ def _recommendations_from_decision(
             if rank - 1 < len(decision.verification_passes)
             else None
         )
+        relation = dict(trace_record.get("relation_to_measured") or {})
+        consistency_warnings: list[str] = []
+        if relation and not relation.get("exact_duplicate_of") and claims_repeat(semantic.get("soft_comment")):
+            closest = relation.get("closest_measured") or {}
+            consistency_warnings.append(
+                f"The semantic assessment calls {recommendation_id} a repeat of a measured experiment, but it differs "
+                f"from the closest measured run (iteration {closest.get('iteration')}): {describe_differences(relation)}. "
+                "That comment was left out of the rationale."
+            )
+            semantic = {**semantic, "consistency_warnings": consistency_warnings}
         rationale = _build_agentic_rationale(
             controller_plan=decision.controller_plan,
             action_package=decision.action_package,
-            semantic_assessment=semantic,
+            semantic_assessment={**semantic, "soft_comment": ""} if consistency_warnings else semantic,
+            relation=relation,
             evidence_refs=evidence_refs,
             planner_error=planner_error,
             batch_role=str(trace_record.get("batch_role") or ""),
@@ -2412,8 +2537,9 @@ def _recommendations_from_decision(
             "rationale": rationale,
             "planner_name": planner_name,
             "planner_error": planner_error,
-            "planner_warnings": _planner_warnings(planner_diagnostics),
+            "planner_warnings": _planner_warnings(planner_diagnostics) + consistency_warnings,
             "proposed_by": str(trace_record.get("proposed_by") or ""),
+            "relation_to_measured": relation,
             "batch_role": trace_record.get("batch_role", ""),
             "batch_role_reason": trace_record.get("batch_role_reason", ""),
             "batch_slot": trace_record.get("batch_slot", {}),
@@ -2559,6 +2685,7 @@ def _build_agentic_rationale(
     batch_slot: dict[str, Any] | None = None,
     descriptor_contrast: dict[str, Any] | None = None,
     descriptor_signal: dict[str, Any] | None = None,
+    relation: dict[str, Any] | None = None,
 ) -> str:
     action = (
         action_package.get("executed_execution_action")
@@ -2598,6 +2725,9 @@ def _build_agentic_rationale(
     )
     if descriptor_sentence:
         pieces.append(descriptor_sentence)
+    relation_text = relation_sentence(relation or {})
+    if relation_text:
+        pieces.append(relation_text)
     if not slot_rationale:
         reasoning = str(controller_plan.get("reasoning") or "").strip()
         if reasoning:

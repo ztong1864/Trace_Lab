@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import hmac
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,9 @@ from chem_agent_bo.lab.project import LabProject, ProjectConfig
 from chem_agent_bo.lab.service import LabBOService, ProjectBusyError, ProjectCheckError
 
 
+ADMIN_REMOVE_ALL_CONFIRM = "remove all projects"
+
+
 def create_app(projects_root: str | Path):
     """Create a FastAPI app.
 
@@ -26,9 +31,9 @@ def create_app(projects_root: str | Path):
     factory and do not affect benchmark runners.
     """
 
-    global BackgroundTasks, FastAPI, HTTPException, FileResponse, StaticFiles
+    global BackgroundTasks, FastAPI, HTTPException, FileResponse, Request, StaticFiles
     try:
-        from fastapi import BackgroundTasks, FastAPI, HTTPException
+        from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
         from fastapi.responses import FileResponse
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:  # pragma: no cover
@@ -176,6 +181,45 @@ def create_app(projects_root: str | Path):
             return service.unregister_project(project_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc.args[0] if exc.args else exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: str) -> dict[str, Any]:
+        """Remove a project of the projects root; its folder is kept in _backups/deleted_*."""
+        try:
+            return service.delete_project(project_id)
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/admin/projects/remove-all")
+    def remove_all_projects(request: Request, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Administrator clean-up of the whole projects root. Off unless TRACE_ADMIN_TOKEN is set;
+        the caller sends it in X-Trace-Admin-Token. Dry run unless dry_run=false and confirm is given."""
+        token = os.environ.get("TRACE_ADMIN_TOKEN", "").strip()
+        if not token:
+            raise HTTPException(status_code=404, detail="The admin API is not enabled (set TRACE_ADMIN_TOKEN).")
+        if not hmac.compare_digest(request.headers.get("x-trace-admin-token", "").encode(), token.encode()):
+            raise HTTPException(status_code=403, detail="Missing or wrong X-Trace-Admin-Token.")
+        payload = payload or {}
+        dry_run = payload.get("dry_run", True) is not False
+        if not dry_run and payload.get("confirm") != ADMIN_REMOVE_ALL_CONFIRM:
+            raise HTTPException(
+                status_code=400,
+                detail=f'A real run needs "dry_run": false and "confirm": "{ADMIN_REMOVE_ALL_CONFIRM}".',
+            )
+        keep = payload.get("keep") or []
+        if not isinstance(keep, list):
+            raise HTTPException(status_code=400, detail="keep must be a list of project handles.")
+        try:
+            return service.remove_all_projects(keep=[str(item) for item in keep], dry_run=dry_run,
+                                               purge=bool(payload.get("purge", False)))
+        except ProjectBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

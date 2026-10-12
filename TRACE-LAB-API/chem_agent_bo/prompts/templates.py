@@ -730,6 +730,7 @@ def build_semantic_assessment_prompt(
     knowledge_meta: dict[str, Any] | None = None,
     value_annotations: list[dict[str, Any]] | None = None,
     skill_block: str | None = None,
+    relation: dict[str, Any] | None = None,
 ) -> str:
     guidance_block = _instruction_block(
         skill_block,
@@ -739,11 +740,21 @@ Guidance:
 - Score plausibility and novelty, and provide concise risk explanation.
 """,
     )
+    relation_block = (
+        "Relation to measured experiments (computed by code, authoritative):\n"
+        f"{_to_json(relation)}\n"
+        "Use this for novelty and duplication. When exact_duplicate_of is null the candidate is NOT a repeat "
+        "of any measured experiment, however close it is; name the differing variables from "
+        "closest_measured instead of comparing conditions yourself.\n"
+        if relation else ""
+    )
     return f"""
 Task: provide semantic soft assessment for a BO candidate.
 
 Proposed experiment:
 {_to_json(candidate_condition)}
+
+{relation_block}
 
 Reaction context:
 {_to_json(reaction_context)}

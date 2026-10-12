@@ -35,6 +35,7 @@ from chem_agent_bo.lab.service import (
     _canonical_design_value,
     _descriptor_ineligibility_error,
     _estimated_design_space_size,
+    _load_agentic_config,
     _validate_project_config,
 )
 
@@ -134,7 +135,36 @@ def _check_config(folder: Path, report: _Report) -> ProjectConfig | None:
             "planner_use_descriptors": config.planner_use_descriptors,
         }
     )
+    note = _agent_llm_note(config, folder)
+    if note:
+        report.facts["agent_llm_note"] = note
     return config
+
+
+def _agent_llm_note(config: ProjectConfig, folder: Path) -> str:
+    """A fact (not a warning) when the project's agent config was tuned for another model or gateway,
+    typical for a project brought over from another server."""
+    try:
+        own = _load_agentic_config(config.agent_config_path, project_dir=folder).runtime
+        default = _load_agentic_config("configs/agent_bo.yaml", project_dir=folder).runtime
+    except Exception:  # noqa: BLE001 - an unreadable config is reported elsewhere
+        return ""
+    differences = []
+    if str(own.model_name) != str(default.model_name):
+        differences.append(f"model_name {own.model_name} (this server's default: {default.model_name})")
+    if (own.api_base or "") != (default.api_base or ""):
+        differences.append(f"api_base {own.api_base or 'none'}")
+    if own.temperature is not None:
+        differences.append(f"temperature {own.temperature}")
+    if not differences:
+        return ""
+    return (
+        f"The project's agent config ({config.agent_config_path}) sets {', '.join(differences)}. With a caller's own "
+        "LLM key (e.g. FounDryClaw's 密钥管理 key) the agentic steps use that key's model and endpoint with the other "
+        "settings of this file; without one, this file's model and endpoint are used with this server's "
+        "OPENAI_API_KEY. To change them, edit this file (FounDryClaw's import_project sets them to the user's "
+        "密钥管理 model and endpoint)."
+    )
 
 
 def _check_design_space(folder: Path, config: ProjectConfig | None, report: _Report) -> DesignSpace | None:
